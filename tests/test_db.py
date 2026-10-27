@@ -93,6 +93,22 @@ class DbSchemaTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "누락 헤더.*URL"):
                 load_crawl_rows(path)
 
+    def test_load_crawl_rows_allows_blank_optional_margin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "crawl.xlsx"
+            make_crawl(
+                path,
+                rows=[
+                    [1, "img", "상품1", 1000, "https://order/1", "MJ-X", None],
+                    [2, "img", "상품2", 2000, "https://order/2", "MJ-Y", ""],
+                ],
+            )
+            data = load_crawl_rows(path)
+
+        self.assertEqual(len(data.rows), 2)
+        for row in data.rows:
+            self.assertIsNone(row.margin_rate)
+
     def test_load_crawl_rows_rejects_blank_required_value(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "crawl.xlsx"

@@ -4,6 +4,8 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
+from .pricing import parse_margin_ratio
+
 DEFAULT_DB_PATH = Path("data/playauto.db")
 SCHEMA_VERSION = 1
 
@@ -59,7 +61,7 @@ CREATE TABLE IF NOT EXISTS listings (
     bundle_qty INTEGER NOT NULL DEFAULT 1,
     sale_name TEXT,
     market_price INTEGER,
-    margin_rate REAL NOT NULL DEFAULT 0.15
+    margin_rate REAL DEFAULT 0.15
         CHECK (margin_rate >= 0 AND margin_rate < 1),
     unit_price_visible TEXT,
     display_capacity TEXT,
@@ -158,12 +160,9 @@ def _optional_text(value):
 
 
 def _parse_margin(value):
-    text = str(value).strip().replace("%", "").strip()
-    if not text:
+    rate = parse_margin_ratio(value)
+    if rate is None:
         return None
-    rate = float(text)
-    if rate >= 1:
-        rate /= 100.0
     if not 0 <= rate < 1:
         raise ValueError(f"마진율 범위가 올바르지 않습니다: {value!r}")
     return rate
