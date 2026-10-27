@@ -1,5 +1,6 @@
 ﻿import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -115,6 +116,15 @@ class CrawlRow:
 class CrawlData:
     rows: tuple[CrawlRow, ...]
     skipped: int
+
+
+@dataclass(frozen=True)
+class ImportSummary:
+    batch_id: int
+    inserted: int
+    updated: int
+    skipped: int
+    row_count: int
 
 
 def connect(db_path: str | Path) -> sqlite3.Connection:
@@ -273,3 +283,173 @@ def load_crawl_rows(path: str | Path) -> CrawlData:
         return CrawlData(rows=tuple(rows), skipped=skipped)
     finally:
         wb.close()
+
+
+def _seller_code_taken(conn: sqlite3.Connection, code: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM listings WHERE seller_code = ?", (code,)
+    ).fetchone()
+    return row is not None
+
+
+def _generate_seller_code(conn: sqlite3.Connection, source_seq: int) -> str:
+    base = f"MJ-{source_seq:04d}"
+    code = base
+    suffix = 2
+    while _seller_code_taken(conn, code):
+        code = f"{base}-{suffix}"
+        suffix += 1
+    return code
+
+
+def import_crawl(
+    conn: sqlite3.Connection,
+    crawl: CrawlData,
+    category_code: str,
+    margin: float,
+    crawl_path: str,
+) -> ImportSummary:
+    if not category_code or not str(category_code).strip():
+        raise ValueError("카테고리 코드가 비어 있습니다.")
+    if margin is None or not 0 <= margin < 1:
+        raise ValueError(f"마진율 범위가 올바르지 않습니다: {margin!r}")
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    inserted = 0
+    updated = 0
+
+    with conn:
+        cursor = conn.execute(
+            "INSERT INTO import_batches (crawl_path) VALUES (?)", (crawl_path,)
+        )
+        batch_id = cursor.lastrowid
+
+        for row in crawl.rows:
+            existing_product = conn.execute(
+                "SELECT id FROM products WHERE order_url = ?", (row.order_url,)
+            ).fetchone()
+
+            if existing_product is None:
+                cursor = conn.execute(
+                    "INSERT INTO products ("
+                    "source_seq, name, image_url, order_url, category_code, "
+                    "detail, keywords, manufacturer, brand, model, "
+                    "created_at, updated_at, last_seen_at, last_batch_id"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        row.source_seq,
+                        row.name,
+                        row.image_url,
+                        row.order_url,
+                        category_code,
+                        row.detail,
+                        row.keywords,
+                        row.manufacturer,
+                        row.brand,
+                        row.model,
+                        now,
+                        now,
+                        now,
+                        batch_id,
+                    ),
+                )
+                product_id = cursor.lastrowid
+                inserted += 1
+            else:
+                product_id = existing_product["id"]
+                conn.execute(
+                    "UPDATE products SET "
+                    "source_seq = ?, name = ?, image_url = ?, "
+                    "last_seen_at = ?, last_batch_id = ?, updated_at = ? "
+                    "WHERE id = ?",
+                    (
+                        row.source_seq,
+                        row.name,
+                        row.image_url,
+                        now,
+                        batch_id,
+                        now,
+                        product_id,
+                    ),
+                )
+                updated += 1
+
+            existing_listing = conn.execute(
+                "SELECT id FROM listings WHERE product_id = ? AND bundle_qty = 1",
+                (product_id,),
+            ).fetchone()
+
+            if existing_listing is None:
+                if row.seller_code:
+                    if _seller_code_taken(conn, row.seller_code):
+                        raise ValueError(
+                            f"[크롤] {row.source_seq}행 판매자관리코드 중복: "
+                            f"{row.seller_code}"
+                        )
+                    seller_code = row.seller_code
+                else:
+                    seller_code = _generate_seller_code(conn, row.source_seq)
+
+                margin_rate = (
+                    row.margin_rate if row.margin_rate is not None else margin
+                )
+                cursor = conn.execute(
+                    "INSERT INTO listings ("
+                    "product_id, seller_code, bundle_qty, sale_name, market_price, "
+                    "margin_rate, unit_price_visible, display_capacity, "
+                    "display_unit, pack_config, capacity_per_unit, active, "
+                    "created_at, updated_at"
+                    ") VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                    (
+                        product_id,
+                        seller_code,
+                        row.name,
+                        row.market_price,
+                        margin_rate,
+                        row.unit_price_visible,
+                        row.display_capacity,
+                        row.display_unit,
+                        row.pack_config,
+                        row.capacity_per_unit,
+                        now,
+                        now,
+                    ),
+                )
+                listing_id = cursor.lastrowid
+            else:
+                listing_id = existing_listing["id"]
+                conn.execute(
+                    "UPDATE listings SET market_price = ?, updated_at = ? "
+                    "WHERE id = ?",
+                    (row.market_price, now, listing_id),
+                )
+
+            conn.execute(
+                "INSERT INTO price_history ("
+                "product_id, listing_id, price, observed_at, batch_id, crawl_path"
+                ") VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    product_id,
+                    listing_id,
+                    row.market_price,
+                    now,
+                    batch_id,
+                    crawl_path,
+                ),
+            )
+
+        row_count = len(crawl.rows)
+        conn.execute(
+            "UPDATE import_batches SET "
+            "row_count = ?, inserted_count = ?, updated_count = ?, skipped_count = ? "
+            "WHERE id = ?",
+            (row_count, inserted, updated, crawl.skipped, batch_id),
+        )
+
+    return ImportSummary(
+        batch_id=batch_id,
+        inserted=inserted,
+        updated=updated,
+        skipped=crawl.skipped,
+        row_count=row_count,
+    )
