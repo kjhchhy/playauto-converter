@@ -127,6 +127,31 @@ class ImportSummary:
     row_count: int
 
 
+@dataclass(frozen=True)
+class ExportRow:
+    listing_id: int
+    product_id: int
+    source_seq: int
+    seller_code: str
+    sale_name: str
+    market_price: int
+    margin_rate: float
+    image_url: str
+    order_url: str
+    category_code: str
+    detail: str | None
+    keywords: str | None
+    manufacturer: str | None
+    brand: str | None
+    model: str | None
+    unit_price_visible: str | None
+    display_capacity: str | None
+    display_unit: str | None
+    pack_config: str | None
+    capacity_per_unit: str | None
+    bundle_qty: int
+
+
 def connect(db_path: str | Path) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
