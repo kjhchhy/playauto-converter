@@ -152,6 +152,97 @@ class ExportRow:
     bundle_qty: int
 
 
+EXPORT_QUERY = """
+SELECT l.id AS listing_id, p.id AS product_id, p.source_seq, l.seller_code,
+       l.sale_name, l.market_price, l.margin_rate, p.image_url, p.order_url,
+       p.category_code, p.detail, p.keywords, p.manufacturer, p.brand, p.model,
+       l.unit_price_visible, l.display_capacity, l.display_unit, l.pack_config,
+       l.capacity_per_unit, l.bundle_qty
+FROM listings l JOIN products p ON p.id = l.product_id
+WHERE l.active = 1
+ORDER BY p.source_seq, l.bundle_qty, l.id
+"""
+
+EXPORT_REQUIRED_TEXT = (
+    "seller_code",
+    "sale_name",
+    "image_url",
+    "order_url",
+    "category_code",
+)
+
+
+def fetch_export_rows(conn: sqlite3.Connection) -> list[ExportRow]:
+    return [
+        ExportRow(
+            listing_id=row["listing_id"],
+            product_id=row["product_id"],
+            source_seq=row["source_seq"],
+            seller_code=row["seller_code"],
+            sale_name=row["sale_name"],
+            market_price=row["market_price"],
+            margin_rate=row["margin_rate"],
+            image_url=row["image_url"],
+            order_url=row["order_url"],
+            category_code=row["category_code"],
+            detail=row["detail"],
+            keywords=row["keywords"],
+            manufacturer=row["manufacturer"],
+            brand=row["brand"],
+            model=row["model"],
+            unit_price_visible=row["unit_price_visible"],
+            display_capacity=row["display_capacity"],
+            display_unit=row["display_unit"],
+            pack_config=row["pack_config"],
+            capacity_per_unit=row["capacity_per_unit"],
+            bundle_qty=row["bundle_qty"],
+        )
+        for row in conn.execute(EXPORT_QUERY)
+    ]
+
+
+def validate_export_rows(rows: list[ExportRow]) -> None:
+    if not rows:
+        raise ValueError("내보낼 상품이 없습니다.")
+
+    for row in rows:
+        for field in EXPORT_REQUIRED_TEXT:
+            if _is_blank(getattr(row, field)):
+                raise ValueError(
+                    f"listing {row.listing_id}: {field} 값이 비어 있습니다."
+                )
+
+        margin_rate = row.margin_rate
+        if margin_rate is None:
+            raise ValueError(
+                f"listing {row.listing_id}: margin_rate 값이 비어 있습니다."
+            )
+        try:
+            valid_margin = 0 <= margin_rate < 1
+        except TypeError:
+            valid_margin = False
+        if not valid_margin:
+            raise ValueError(
+                f"listing {row.listing_id}: margin_rate 범위가 올바르지 않습니다: "
+                f"{margin_rate!r}"
+            )
+
+        market_price = row.market_price
+        if market_price is None:
+            raise ValueError(
+                f"listing {row.listing_id}: market_price 값이 비어 있습니다."
+            )
+        try:
+            valid_price = market_price > 0
+        except TypeError:
+            valid_price = False
+        if not valid_price:
+            raise ValueError(
+                f"listing {row.listing_id}: market_price 값이 올바르지 않습니다: "
+                f"{market_price!r}"
+            )
+
+
 def connect(db_path: str | Path) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)

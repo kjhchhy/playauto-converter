@@ -1,9 +1,13 @@
+from datetime import date
 from pathlib import Path
 
 from openpyxl import load_workbook
 
 from .constants import build_setting_headers
-from .db import ExportRow
+from .db import (
+    ExportRow, connect, ensure_schema, fetch_export_rows, validate_export_rows,
+)
+from .xlsx import convert_phase1, setting_copy_path
 
 REQUIRED_SHEETS = ("setting", "template")
 TEMPLATE_INFO = "1박스"
@@ -60,3 +64,41 @@ def write_setting_from_rows(
     finally:
         wb.close()
     return destination
+
+
+def export_from_db(
+    db_path,
+    reference_path,
+    output_dir,
+    selected_option,
+    coupang_single=False,
+    commission=None,
+    run_date=None,
+) -> dict:
+    run_date = run_date or date.today()
+
+    conn = connect(db_path)
+    try:
+        ensure_schema(conn)
+        rows = fetch_export_rows(conn)
+        validate_export_rows(rows)
+    finally:
+        conn.close()
+
+    setting_path = write_setting_from_rows(
+        reference_path, rows, setting_copy_path(output_dir, run_date)
+    )
+    result = convert_phase1(
+        setting_path,
+        output_dir,
+        selected_option,
+        coupang_single,
+        commission,
+        run_date,
+        copy_setting=False,
+    )
+    return {
+        "setting": setting_path,
+        "single": result["single"],
+        "general": result["general"],
+    }
