@@ -3,7 +3,7 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-from .constants import build_setting_headers
+from .constants import COUPANG_OPTION_HEADERS, build_setting_headers
 from .db import (
     ExportRow, connect, ensure_schema, fetch_export_rows, validate_export_rows,
 )
@@ -14,12 +14,18 @@ TEMPLATE_INFO = "1박스"
 ORDER_URL_HEADER = "주문링크"
 
 
-def _setting_headers():
-    return [*build_setting_headers()[:-1], ORDER_URL_HEADER]
+OPTION_HEADERS = ["옵션조합", "옵션", *COUPANG_OPTION_HEADERS]
 
 
-def _row_values(row: ExportRow):
-    return [
+def _setting_headers(coupang_single=False):
+    headers = [*build_setting_headers()[:-1], ORDER_URL_HEADER]
+    if coupang_single:
+        headers[-1:-1] = OPTION_HEADERS
+    return headers
+
+
+def _row_values(row: ExportRow, coupang_single=False):
+    values = [
         row.category_code,
         TEMPLATE_INFO,
         row.seller_code,
@@ -39,12 +45,16 @@ def _row_values(row: ExportRow):
         row.pack_config,
         row.order_url,
     ]
+    if coupang_single:
+        values[-1:-1] = [None] * len(OPTION_HEADERS)
+    return values
 
 
 def write_setting_from_rows(
     reference_path: str | Path,
     rows: list[ExportRow],
     output_path: str | Path,
+    coupang_single=False,
 ) -> Path:
     wb = load_workbook(reference_path)
     try:
@@ -54,9 +64,9 @@ def write_setting_from_rows(
 
         ws = wb["setting"]
         ws.delete_rows(1, ws.max_row)
-        ws.append(_setting_headers())
+        ws.append(_setting_headers(coupang_single))
         for row in rows:
-            ws.append(_row_values(row))
+            ws.append(_row_values(row, coupang_single))
 
         destination = Path(output_path)
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -86,7 +96,10 @@ def export_from_db(
         conn.close()
 
     setting_path = write_setting_from_rows(
-        reference_path, rows, setting_copy_path(output_dir, run_date)
+        reference_path,
+        rows,
+        setting_copy_path(output_dir, run_date),
+        coupang_single=coupang_single,
     )
     result = convert_phase1(
         setting_path,
