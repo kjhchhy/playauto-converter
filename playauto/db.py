@@ -39,11 +39,11 @@ CREATE TABLE IF NOT EXISTS import_batches (
 
 CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_seq INTEGER,
+    source_seq INTEGER NOT NULL,
     name TEXT NOT NULL,
-    image_url TEXT,
-    order_url TEXT UNIQUE,
-    category_code TEXT,
+    image_url TEXT NOT NULL,
+    order_url TEXT NOT NULL UNIQUE,
+    category_code TEXT NOT NULL,
     detail TEXT,
     keywords TEXT,
     manufacturer TEXT,
@@ -51,17 +51,17 @@ CREATE TABLE IF NOT EXISTS products (
     model TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_seen_at TEXT,
+    last_seen_at TEXT NOT NULL,
     last_batch_id INTEGER REFERENCES import_batches(id)
 );
 
 CREATE TABLE IF NOT EXISTS listings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     product_id INTEGER NOT NULL REFERENCES products(id),
-    seller_code TEXT UNIQUE,
+    seller_code TEXT NOT NULL UNIQUE,
     bundle_qty INTEGER NOT NULL DEFAULT 1,
-    sale_name TEXT,
-    market_price INTEGER,
+    sale_name TEXT NOT NULL,
+    market_price INTEGER NOT NULL,
     margin_rate REAL DEFAULT 0.15
         CHECK (margin_rate >= 0 AND margin_rate < 1),
     unit_price_visible TEXT,

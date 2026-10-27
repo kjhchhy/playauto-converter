@@ -36,6 +36,32 @@ def make_crawl(path, headers=None, rows=None):
 
 
 class DbSchemaTests(unittest.TestCase):
+    def test_schema_rejects_null_required_product_and_listing_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = connect(Path(tmp) / "test.db")
+            try:
+                ensure_schema(conn)
+                with self.assertRaises(sqlite3.IntegrityError):
+                    conn.execute(
+                        "INSERT INTO products (source_seq, name, image_url, "
+                        "order_url, category_code, last_seen_at) "
+                        "VALUES (1, 'name', 'img', 'https://order/1', NULL, 'now')"
+                    )
+                product_id = conn.execute(
+                    "INSERT INTO products (source_seq, name, image_url, "
+                    "order_url, category_code, last_seen_at) "
+                    "VALUES (1, 'name', 'img', 'https://order/2', 'CAT', 'now')"
+                ).lastrowid
+                with self.assertRaises(sqlite3.IntegrityError):
+                    conn.execute(
+                        "INSERT INTO listings (product_id, seller_code, "
+                        "sale_name, market_price) "
+                        "VALUES (?, 'S1', NULL, 1000)",
+                        (product_id,),
+                    )
+            finally:
+                conn.close()
+
     def test_ensure_schema_creates_tables_and_version(self):
         with tempfile.TemporaryDirectory() as tmp:
             conn = connect(Path(tmp) / "test.db")
