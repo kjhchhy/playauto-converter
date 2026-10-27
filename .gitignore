@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.superpowers/
+data/
+out/
+*.db
+*.db-shm
+*.db-wal
+*.xlsx
+*.log
