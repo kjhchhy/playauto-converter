@@ -7,16 +7,19 @@ User=playauto
 Group=playauto
 WorkingDirectory=/opt/playauto
 Environment=PYTHONPATH=/opt/playauto:/opt/playauto/vendor
+Environment=HOME=/opt/playauto
 EnvironmentFile=/etc/playauto.env
 ExecStart=/opt/playauto/.venv/bin/gunicorn --workers 1 --threads 4 --bind 127.0.0.1:8000 "playauto.web.app:create_app()"
 Restart=always
 RestartSec=5
 
-# 보안 강화: 권한 상승 차단, 전용 /tmp, 시스템 경로 읽기 전용.
-# /home은 읽기/쓰기가 가능해야 Playwright 브라우저 캐시를 사용할 수 있다.
+# 보안 강화: 권한 상승 차단, 전용 /tmp, 파일시스템 읽기 전용.
+# 쓰기는 /opt/playauto/data 아래로만 허용한다(DB/WAL, reference, exports,
+# uploads). Playwright 브라우저 캐시(/opt/playauto/.cache)는 읽기 전용으로
+# 보이므로 그대로 사용할 수 있다.
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+ProtectSystem=strict
 ReadWritePaths=/opt/playauto/data
 
 [Install]
