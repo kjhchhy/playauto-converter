@@ -75,7 +75,7 @@ class DbSchemaTests(unittest.TestCase):
             self.assertTrue(
                 {"products", "listings", "price_history", "import_batches"} <= names
             )
-            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
             conn.close()
 
     def test_load_crawl_rows_maps_optional_columns_and_counts_blank_rows(self):
