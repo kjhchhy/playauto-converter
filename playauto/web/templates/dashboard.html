@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "base.html" import csrf_field %}
+{% from "imports.html" import status_label %}
 
 {% block title %}대시보드 · 플레이오토 관리자{% endblock %}
 
@@ -44,8 +45,13 @@
     <tbody>
       {% for job in recent_jobs %}
       <tr>
-        <td>{{ job.status }}</td>
-        <td>{{ job.source }}</td>
+        <td>{{ status_label(job.status) }}</td>
+        <td>
+          {% if job.source == "search" %}검색
+          {% elif job.source == "xlsx" %}엑셀
+          {% else %}{{ job.source }}
+          {% endif %}
+        </td>
         <td>{{ job.started_at or job.created_at }}</td>
         <td>{{ job.inserted_count }}건 신규 / {{ job.updated_count }}건 갱신</td>
       </tr>

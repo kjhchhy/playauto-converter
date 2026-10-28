@@ -54,7 +54,7 @@
         <td>{{ item.market_price_display }}</td>
         <td>
           {% if item.unit_value is not none %}
-          {{ item.unit_display }}{{ item.unit_label }}
+          {{ item.unit_display }} / {{ item.unit_label }}
           {% else %}
           -
           {% endif %}

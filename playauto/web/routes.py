@@ -725,12 +725,12 @@ def settings_submit():
             margin = float(raw_margin)
         except (TypeError, ValueError):
             margin = None
-        if margin is None or not 0 <= margin <= 1:
+        if margin is None or not 0 <= margin < 1:
             return (
                 render_template(
                     "settings.html",
                     **_settings_context(
-                        conn, "마진율은 0 이상 1 이하여야 합니다."
+                        conn, "마진율은 0 이상 1 미만이어야 합니다."
                     ),
                 ),
                 400,

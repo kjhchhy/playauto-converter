@@ -38,6 +38,8 @@ class CompareAndSettingsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("12,765", body)
         self.assertIn("100ml", body)
+        self.assertIn("12,765 / 100ml", body)
+        self.assertNotIn("12,765100ml", body)
         self.assertIn("34,200", body)
 
     def test_settings_update_persists(self):
@@ -73,6 +75,20 @@ class CompareAndSettingsTests(unittest.TestCase):
             self.conn.execute("SELECT key, value FROM app_settings").fetchall()
         )
         self.assertNotEqual(rows.get("default_margin"), "1.5")
+
+    def test_settings_margin_one_rejected(self):
+        response = post_with_csrf(
+            self.client,
+            "/settings",
+            {"default_margin": "1.0", "default_category_code": "가공식품[21]"},
+        )
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("마진율", body)
+        rows = dict(
+            self.conn.execute("SELECT key, value FROM app_settings").fetchall()
+        )
+        self.assertNotEqual(rows.get("default_margin"), "1.0")
 
     def test_settings_invalid_category_rejected(self):
         response = post_with_csrf(
@@ -120,6 +136,27 @@ class CompareAndSettingsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("활성 listing", body)
         self.assertIn("최근 작업 1건", body)
+
+    def test_dashboard_renders_korean_job_labels(self):
+        job_id = create_crawl_job(
+            self.conn,
+            source="search",
+            search_url="https://www.gmarket.co.kr/n/stardelivery/search?keyword=x",
+            category_code="기타재화[35]",
+            margin=0.15,
+        )
+        self.conn.execute(
+            "UPDATE crawl_jobs SET status = 'succeeded' WHERE id = ?",
+            (job_id,),
+        )
+        self.conn.commit()
+        response = self.client.get("/")
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("완료", body)
+        self.assertIn("검색", body)
+        self.assertNotIn("succeeded", body)
+        self.assertNotIn("search", body)
 
 
 if __name__ == "__main__":

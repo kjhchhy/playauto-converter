@@ -29,9 +29,9 @@
       {% endfor %}
     </select>
 
-    <label for="default_margin">기본 마진율 (0~1)</label>
+    <label for="default_margin">기본 마진율 (0 이상 1 미만)</label>
     <input id="default_margin" type="number" name="default_margin"
-           min="0" max="1" step="0.01"
+           min="0" max="0.99" step="0.01"
            value="{{ settings.default_margin }}" required>
 
     <label for="commission_gmarket">지마켓 수수료 (%)</label>

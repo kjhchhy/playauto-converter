@@ -275,22 +275,18 @@ DEFAULT_SETTINGS = {
 
 
 def ensure_default_settings(conn: sqlite3.Connection) -> None:
-    """Insert missing default keys without overwriting user values."""
-    existing = {
-        row[0] for row in conn.execute("SELECT key FROM app_settings").fetchall()
-    }
-    missing = {
-        key: value
-        for key, value in DEFAULT_SETTINGS.items()
-        if key not in existing
-    }
-    if missing:
-        set_settings(conn, missing)
+    """Atomically insert missing default keys without overwriting values."""
+    with conn:
+        conn.executemany(
+            "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO NOTHING",
+            list(DEFAULT_SETTINGS.items()),
+        )
 
 
 def list_compare_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT p.id, p.name, p.image_url, p.brand, p.order_url, "
+        "SELECT p.id, p.name, p.image_url, p.brand, "
         "l.id AS listing_id, l.market_price, l.margin_rate, "
         "l.capacity_per_unit, l.bundle_qty "
         "FROM listings l "
