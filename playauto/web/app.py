@@ -58,3 +58,13 @@ def create_app(config: dict | None = None) -> Flask:
         return {"csrf_token": csrf_token(session)}
 
     return app
+
+
+if __name__ == "__main__":
+    import os
+
+    create_app().run(
+        host="127.0.0.1",
+        port=int(os.environ.get("PORT", "8000")),
+        debug=False,
+    )

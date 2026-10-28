@@ -11,8 +11,19 @@ GMARKET_SEARCH_PATH = "/n/stardelivery/search"
 CARD_SELECTOR = ".box__itemcard"
 CARD_WAIT_MS = 30000
 DEFAULT_PROFILE = Path("data/browser-profile")
-BLOCKED_MARKERS = ("just a moment", "verify you are human", "cloudflare")
-BLOCKED_MESSAGE = "Gmarket이 자동 접속을 차단했습니다. 잠시 후 다시 시도해 주세요."
+BLOCKED_STATUSES = frozenset({403, 429, 503})
+BLOCKED_MARKERS = (
+    "just a moment",
+    "verify you are human",
+    "cloudflare",
+    "잠시만 기다려주십시오",
+    "원활한 서비스 이용을 위한 간단한 확인 안내",
+    "사람인지 확인하십시오",
+)
+BLOCKED_MESSAGE = (
+    "Gmarket이 자동 요청을 차단했습니다. "
+    "크롤 xlsx를 업로드하거나 잠시 후 다시 시도해주세요."
+)
 
 _CAPACITY_RE = re.compile(r"^(\d+(?:\.\d+)?)\s*(ml|g|개)$", re.IGNORECASE)
 _DROP_NAME_LINES = {"공식", "상품"}
@@ -27,6 +38,13 @@ def is_blocked_page(title: str, body_text: str, card_count: int) -> bool:
         return False
     haystack = f"{title or ''}\n{body_text or ''}".lower()
     return any(marker in haystack for marker in BLOCKED_MARKERS)
+
+
+def is_blocked_status(status) -> bool:
+    try:
+        return int(status) in BLOCKED_STATUSES
+    except (TypeError, ValueError):
+        return False
 
 
 EXTRACT_CARDS_JS = """
@@ -91,18 +109,6 @@ _PAGE_LINKS_JS = """
 
 def extract_cards(page) -> list[dict]:
     return page.evaluate(EXTRACT_CARDS_JS)
-
-
-def _page_title_body(page) -> tuple[str, str]:
-    try:
-        title = page.title()
-    except Exception:  # noqa: BLE001 - page may be mid-navigation
-        title = ""
-    try:
-        body = page.inner_text("body")
-    except Exception:  # noqa: BLE001 - body may be missing
-        body = ""
-    return title or "", body or ""
 
 
 def _profile_path(browser_profile) -> Path:
@@ -215,25 +221,23 @@ def fetch_search_cards(
             timezone_id="Asia/Seoul",
         )
         page = context.pages[0] if context.pages else context.new_page()
-        page.goto(search_url, wait_until="domcontentloaded")
+        response = page.goto(search_url, wait_until="domcontentloaded")
+        if is_blocked_status(getattr(response, "status", None)):
+            raise CrawlBlockedError(BLOCKED_MESSAGE)
 
         cards: list[dict] = []
         try:
             page.wait_for_selector(CARD_SELECTOR, timeout=CARD_WAIT_MS)
         except PlaywrightTimeoutError:
-            title, body = _page_title_body(page)
-            if is_blocked_page(title, body, 0):
-                raise CrawlBlockedError(BLOCKED_MESSAGE)
-            return cards
+            raise CrawlBlockedError(BLOCKED_MESSAGE) from None
 
         visited: set[str] = set()
         pagination_visited: set[str] = {getattr(page, "url", "") or ""}
         pages_loaded = 0
         while pages_loaded < max_pages:
             pages_loaded += 1
-            title, body = _page_title_body(page)
             page_cards = extract_cards(page) or []
-            if not page_cards and is_blocked_page(title, body, 0):
+            if not page_cards:
                 raise CrawlBlockedError(BLOCKED_MESSAGE)
 
             new_cards = []
@@ -255,15 +259,13 @@ def fetch_search_cards(
             if not next_url:
                 break
             pagination_visited.add(next_url)
-            page.goto(next_url, wait_until="domcontentloaded")
+            response = page.goto(next_url, wait_until="domcontentloaded")
+            if is_blocked_status(getattr(response, "status", None)):
+                raise CrawlBlockedError(BLOCKED_MESSAGE)
             try:
                 page.wait_for_selector(CARD_SELECTOR, timeout=CARD_WAIT_MS)
             except PlaywrightTimeoutError:
-                title, body = _page_title_body(page)
-                remaining = extract_cards(page) or []
-                if not remaining and is_blocked_page(title, body, 0):
-                    raise CrawlBlockedError(BLOCKED_MESSAGE)
-                break
+                raise CrawlBlockedError(BLOCKED_MESSAGE) from None
 
         return cards[:max_rows]
     finally:

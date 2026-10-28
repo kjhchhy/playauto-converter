@@ -200,3 +200,11 @@ journald 기본 보관 정책을 쓰며, 디스크 사용량은
 `journalctl --disk-usage`로 확인한다. 보관 기간이 필요하면
 `/etc/systemd/journald.conf`의 `MaxRetentionSec`/`SystemMaxUse`를 조정하고
 `systemctl restart systemd-journald`로 적용한다.
+
+## 13. Gmarket 차단 시
+
+검색 job이 `failed`로 끝나고 `Gmarket이 자동 요청을 차단했습니다` 메시지가
+보이면 Cloudflare 확인 페이지가 반환된 것이다. CAPTCHA를 우회하거나
+프록시를 추가하지 말고, Gmarket에서 내려받은 크롤 xlsx를 `/imports`의
+xlsx 업로드로 넣는다. 차단은 LXC의 공인 IP나 일시적인 요청 패턴에 따라
+발생할 수 있으므로 잠시 후 검색을 다시 시도할 수 있다.

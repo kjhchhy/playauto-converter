@@ -4,10 +4,12 @@ from tempfile import TemporaryDirectory
 
 from playauto.db import connect, ensure_schema
 from playauto.web.crawler import (
+    BLOCKED_MESSAGE,
     CrawlBlockedError,
     _next_page_url,
     extract_cards,
     is_blocked_page,
+    is_blocked_status,
 )
 from playauto.web.queries import claim_next_job, create_crawl_job, get_job
 from playauto.web.worker import process_job
@@ -87,6 +89,34 @@ class CrawlerIntegrationTests(unittest.TestCase):
         )
         self.assertFalse(
             is_blocked_page("스타배송 - 카프리썬 검색결과", "", 12)
+        )
+
+    def test_blocked_page_detects_korean_turnstile(self):
+        self.assertTrue(
+            is_blocked_page(
+                "잠시만 기다려주십시오",
+                "원활한 서비스 이용을 위한 간단한 확인 안내",
+                0,
+            )
+        )
+        self.assertTrue(
+            is_blocked_page("Gmarket", "사람인지 확인하십시오", 0)
+        )
+        self.assertFalse(
+            is_blocked_page("스타배송 - 카프리썬 검색결과", "", 12)
+        )
+
+    def test_blocked_status(self):
+        for status in (403, 429, 503):
+            self.assertTrue(is_blocked_status(status))
+        self.assertFalse(is_blocked_status(200))
+        self.assertFalse(is_blocked_status(None))
+
+    def test_blocked_message_guides_xlsx_fallback(self):
+        self.assertEqual(
+            BLOCKED_MESSAGE,
+            "Gmarket이 자동 요청을 차단했습니다. "
+            "크롤 xlsx를 업로드하거나 잠시 후 다시 시도해주세요.",
         )
 
     def test_extract_cards_returns_raw_contract(self):
