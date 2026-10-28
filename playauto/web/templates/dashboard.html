@@ -13,6 +13,72 @@
 </header>
 
 <section class="card">
-  <p>플레이오토 관리자에 로그인했습니다.</p>
+  <h2>현황</h2>
+  <p class="muted">최근 작업 {{ recent_jobs|length }}건 · 최근 export {{ recent_exports|length }}건</p>
+  <dl class="reference-info">
+    <dt>활성 상품</dt>
+    <dd>{{ active_products }}개</dd>
+    <dt>활성 listing</dt>
+    <dd>{{ active_listings }}개</dd>
+  </dl>
+  <div class="actions">
+    <a class="button secondary" href="{{ url_for('main.products') }}">상품 목록</a>
+    <a class="button secondary" href="{{ url_for('main.imports') }}">가져오기</a>
+    <a class="button secondary" href="{{ url_for('main.compare') }}">가격 비교</a>
+    <a class="button secondary" href="{{ url_for('main.exports') }}">내보내기</a>
+    <a class="button secondary" href="{{ url_for('main.settings') }}">설정</a>
+  </div>
+</section>
+
+<section class="card">
+  <h2>최근 수집 작업</h2>
+  <table class="product-table">
+    <thead>
+      <tr>
+        <th scope="col">상태</th>
+        <th scope="col">방식</th>
+        <th scope="col">시작</th>
+        <th scope="col">결과</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for job in recent_jobs %}
+      <tr>
+        <td>{{ job.status }}</td>
+        <td>{{ job.source }}</td>
+        <td>{{ job.started_at or job.created_at }}</td>
+        <td>{{ job.inserted_count }}건 신규 / {{ job.updated_count }}건 갱신</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4" class="muted">수집 작업이 없습니다.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>최근 export</h2>
+  <table class="product-table">
+    <thead>
+      <tr>
+        <th scope="col">생성 시각</th>
+        <th scope="col">파일 수</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for export in recent_exports %}
+      <tr>
+        <td>{{ export.created_at }}</td>
+        <td>{{ export.files|length }}개</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="2" class="muted">생성된 export가 없습니다.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </section>
 {% endblock %}

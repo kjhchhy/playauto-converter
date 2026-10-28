@@ -265,6 +265,41 @@ def mark_stale_jobs(
         return cursor.rowcount
 
 
+DEFAULT_SETTINGS = {
+    "default_category_code": "기타재화[35]",
+    "default_margin": "0.15",
+    "commission_gmarket": "12.0",
+    "commission_smartstore": "6.0",
+    "commission_coupang": "10.0",
+}
+
+
+def ensure_default_settings(conn: sqlite3.Connection) -> None:
+    """Insert missing default keys without overwriting user values."""
+    existing = {
+        row[0] for row in conn.execute("SELECT key FROM app_settings").fetchall()
+    }
+    missing = {
+        key: value
+        for key, value in DEFAULT_SETTINGS.items()
+        if key not in existing
+    }
+    if missing:
+        set_settings(conn, missing)
+
+
+def list_compare_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT p.id, p.name, p.image_url, p.brand, p.order_url, "
+        "l.id AS listing_id, l.market_price, l.margin_rate, "
+        "l.capacity_per_unit, l.bundle_qty "
+        "FROM listings l "
+        "JOIN products p ON p.id = l.product_id "
+        "WHERE l.active = 1 AND l.bundle_qty = 1 "
+        "ORDER BY l.market_price, l.id"
+    ).fetchall()
+
+
 def get_setting(
     conn: sqlite3.Connection, key: str, default: str | None = None
 ) -> str | None:

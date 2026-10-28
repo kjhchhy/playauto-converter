@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% from "base.html" import csrf_field %}
+
+{% block title %}가격 비교 · 플레이오토 관리자{% endblock %}
+
+{% block content %}
+<header class="topbar">
+  <h1>가격 비교</h1>
+  <form method="post" action="{{ url_for('main.logout') }}">
+    {{ csrf_field() }}
+    <button type="submit" class="secondary">로그아웃</button>
+  </form>
+</header>
+
+<section class="card">
+  <p class="muted">활성 listing {{ items|length }}개 · 정렬: {{ sort }}</p>
+  <table class="product-table">
+    <thead>
+      <tr>
+        <th scope="col">이미지</th>
+        <th scope="col">상품명</th>
+        <th scope="col">브랜드</th>
+        <th scope="col">
+          <a href="{{ url_for('main.compare', sort='price') }}"
+             {% if sort == 'price' %}aria-current="true"{% endif %}>쿠폰가</a>
+        </th>
+        <th scope="col">
+          <a href="{{ url_for('main.compare', sort='unit_price') }}"
+             {% if sort == 'unit_price' %}aria-current="true"{% endif %}>용량당 가격</a>
+        </th>
+        <th scope="col">마진</th>
+        <th scope="col">
+          <a href="{{ url_for('main.compare', sort='sale_price') }}"
+             {% if sort == 'sale_price' %}aria-current="true"{% endif %}>판매가 (지마켓)</a>
+        </th>
+        <th scope="col">판매가 (스마트스토어)</th>
+        <th scope="col">판매가 (쿠팡)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>
+          {% if item.image_url %}
+          <img src="{{ item.image_url }}" alt="" width="48" height="48">
+          {% else %}
+          <span class="muted">-</span>
+          {% endif %}
+        </td>
+        <td>
+          <a href="{{ url_for('main.product_detail', product_id=item.id) }}">{{ item.name }}</a>
+        </td>
+        <td>{{ item.brand or "-" }}</td>
+        <td>{{ item.market_price_display }}</td>
+        <td>
+          {% if item.unit_value is not none %}
+          {{ item.unit_display }}{{ item.unit_label }}
+          {% else %}
+          -
+          {% endif %}
+        </td>
+        <td>{{ "%.2f"|format(item.margin_rate) if item.margin_rate is not none else "-" }}</td>
+        {% for sale in item.sales %}
+        <td>{{ sale.display }}</td>
+        {% endfor %}
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="9" class="muted">비교할 상품이 없습니다.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

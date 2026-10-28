@@ -23,8 +23,10 @@ from flask import (
 
 from playauto.constants import PRODUCT_CODE_META, meta_for_option
 from playauto.db import delete_product
+from playauto.pricing import final_sale_price
 
 from .auth import check_password, csrf_token, login_required
+from .crawler import unit_price
 from .export_service import (
     delete_export,
     export_file,
@@ -34,9 +36,11 @@ from .export_service import (
 )
 from .queries import (
     create_crawl_job,
+    ensure_default_settings,
     get_job,
     get_product_detail,
     get_setting,
+    list_compare_rows,
     list_jobs,
     list_products,
     mark_stale_jobs,
@@ -174,7 +178,23 @@ def logout():
 @bp.get("/")
 @login_required
 def dashboard():
-    return render_template("dashboard.html")
+    conn = _db()
+    active_products = conn.execute(
+        "SELECT COUNT(DISTINCT p.id) FROM products p "
+        "JOIN listings l ON l.product_id = p.id "
+        "WHERE l.active = 1 AND l.bundle_qty = 1"
+    ).fetchone()[0]
+    active_listings = conn.execute(
+        "SELECT COUNT(*) FROM listings "
+        "WHERE active = 1 AND bundle_qty = 1"
+    ).fetchone()[0]
+    return render_template(
+        "dashboard.html",
+        active_products=active_products,
+        active_listings=active_listings,
+        recent_jobs=list_jobs(conn, 5),
+        recent_exports=list_exports(current_app.config["EXPORT_ROOT"])[:5],
+    )
 
 
 def _optional_int(value):
@@ -562,6 +582,199 @@ def _exports_context(error=None) -> dict:
         "commission_defaults": _commission_defaults(conn),
         "error": error,
     }
+
+
+COMPARE_SORTS = ("price", "unit_price", "sale_price")
+
+SALE_MARKETS = (
+    ("commission_gmarket", "지마켓"),
+    ("commission_smartstore", "스마트스토어"),
+    ("commission_coupang", "쿠팡"),
+)
+
+SETTINGS_KEYS = (
+    "default_category_code",
+    "default_margin",
+    "commission_gmarket",
+    "commission_smartstore",
+    "commission_coupang",
+)
+
+
+def _format_money(value) -> str:
+    if value is None:
+        return "-"
+    number = float(value)
+    if number.is_integer():
+        return f"{int(number):,}"
+    return f"{number:,.2f}"
+
+
+def _compare_items(conn) -> list[dict]:
+    ensure_default_settings(conn)
+    commissions = _commission_defaults(conn)
+    items = []
+    for row in list_compare_rows(conn):
+        unit = unit_price(
+            row["market_price"], row["capacity_per_unit"], row["bundle_qty"]
+        )
+        sales = []
+        for key, label in SALE_MARKETS:
+            value = final_sale_price(
+                row["market_price"],
+                row["margin_rate"],
+                commissions[key],
+            )
+            sales.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "value": value,
+                    "display": _format_money(value),
+                }
+            )
+        items.append(
+            {
+                "id": row["id"],
+                "listing_id": row["listing_id"],
+                "name": row["name"],
+                "image_url": row["image_url"],
+                "brand": row["brand"],
+                "market_price": row["market_price"],
+                "market_price_display": _format_money(row["market_price"]),
+                "margin_rate": row["margin_rate"],
+                "unit_value": unit[0] if unit is not None else None,
+                "unit_label": unit[1] if unit is not None else "",
+                "unit_display": (
+                    _format_money(unit[0]) if unit is not None else "-"
+                ),
+                "sales": sales,
+                "sale_sort": sales[0]["value"] if sales else None,
+            }
+        )
+    return items
+
+
+@bp.get("/compare")
+@login_required
+def compare():
+    sort = request.args.get("sort") or "price"
+    if sort not in COMPARE_SORTS:
+        sort = "price"
+    items = _compare_items(_db())
+    if sort == "unit_price":
+        items.sort(
+            key=lambda item: (
+                item["unit_value"] is None,
+                item["unit_value"] or 0,
+                item["listing_id"],
+            )
+        )
+    elif sort == "sale_price":
+        items.sort(
+            key=lambda item: (
+                item["sale_sort"] is None,
+                item["sale_sort"] or 0,
+                item["listing_id"],
+            )
+        )
+    else:
+        items.sort(key=lambda item: (item["market_price"], item["listing_id"]))
+    return render_template(
+        "compare.html", items=items, sort=sort, sorts=COMPARE_SORTS
+    )
+
+
+def _settings_context(conn, error=None) -> dict:
+    ensure_default_settings(conn)
+    return {
+        "settings": {key: get_setting(conn, key) for key in SETTINGS_KEYS},
+        "options": list(PRODUCT_CODE_META),
+        "export_ttl_hours": current_app.config["EXPORT_TTL_HOURS"],
+        "reference": _reference_context(conn),
+        "error": error,
+    }
+
+
+@bp.get("/settings")
+@login_required
+def settings():
+    return render_template("settings.html", **_settings_context(_db()))
+
+
+@bp.post("/settings")
+@login_required
+def settings_submit():
+    conn = _db()
+    ensure_default_settings(conn)
+    current = {key: get_setting(conn, key) for key in SETTINGS_KEYS}
+
+    category = (request.form.get("default_category_code") or "").strip()
+    category = category or current["default_category_code"]
+    try:
+        meta_for_option(category)
+    except ValueError as exc:
+        return (
+            render_template("settings.html", **_settings_context(conn, str(exc))),
+            400,
+        )
+
+    raw_margin = (request.form.get("default_margin") or "").strip()
+    if raw_margin:
+        try:
+            margin = float(raw_margin)
+        except (TypeError, ValueError):
+            margin = None
+        if margin is None or not 0 <= margin <= 1:
+            return (
+                render_template(
+                    "settings.html",
+                    **_settings_context(
+                        conn, "마진율은 0 이상 1 이하여야 합니다."
+                    ),
+                ),
+                400,
+            )
+    else:
+        margin = _setting_float(conn, "default_margin", 0.15)
+
+    commissions = {}
+    for key in (
+        "commission_gmarket",
+        "commission_smartstore",
+        "commission_coupang",
+    ):
+        raw = (request.form.get(key) or "").strip()
+        if raw:
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                value = None
+            if value is None or not 0 <= value < 100:
+                return (
+                    render_template(
+                        "settings.html",
+                        **_settings_context(
+                            conn,
+                            "수수료는 0 이상 100 미만의 숫자여야 합니다.",
+                        ),
+                    ),
+                    400,
+                )
+        else:
+            value = _setting_float(conn, key, COMMISSION_FALLBACK[key])
+        commissions[key] = str(value)
+
+    set_settings(
+        conn,
+        {
+            "default_category_code": category,
+            "default_margin": str(margin),
+            **commissions,
+        },
+    )
+    flash("설정을 저장했습니다.")
+    return redirect(url_for("main.settings"))
 
 
 def _restore_reference(path: Path, previous: bytes | None) -> None:
