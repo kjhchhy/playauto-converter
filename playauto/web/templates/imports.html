@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% from "base.html" import csrf_field %}
+
+{% block title %}가져오기 · 플레이오토 관리자{% endblock %}
+
+{% macro status_label(status) -%}
+{% if status == "queued" %}대기
+{% elif status == "running" %}실행 중
+{% elif status == "succeeded" %}완료
+{% elif status == "failed" %}실패
+{% elif status == "interrupted" %}중단
+{% else %}{{ status }}
+{% endif %}
+{%- endmacro %}
+
+{% block content %}
+<header class="topbar">
+  <h1>상품 가져오기</h1>
+  <form method="post" action="{{ url_for('main.logout') }}">
+    {{ csrf_field() }}
+    <button type="submit" class="secondary">로그아웃</button>
+  </form>
+</header>
+
+{% if error %}
+<p class="flash error">{{ error }}</p>
+{% endif %}
+
+<section class="card">
+  <h2>검색 URL로 수집</h2>
+  <form method="post" action="{{ url_for('main.imports_search_submit') }}" class="filters">
+    {{ csrf_field() }}
+    <label for="search_url">검색 URL</label>
+    <input id="search_url" type="url" name="search_url"
+           placeholder="https://www.gmarket.co.kr/n/stardelivery/search?keyword=...">
+
+    <label for="search_category">카테고리 코드</label>
+    <input id="search_category" type="text" name="category_code"
+           value="기타재화[35]" required>
+
+    <label for="search_margin">마진율</label>
+    <input id="search_margin" type="number" name="margin" min="0" max="0.99"
+           step="0.01" value="0.15" required>
+
+    <div class="actions">
+      <button type="submit">수집 시작</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>엑셀 업로드</h2>
+  <form method="post" action="{{ url_for('main.imports_xlsx_submit') }}"
+        enctype="multipart/form-data" class="filters">
+    {{ csrf_field() }}
+    <label for="file">크롤 엑셀 파일 (.xlsx)</label>
+    <input id="file" type="file" name="file" accept=".xlsx" required>
+
+    <label for="xlsx_category">카테고리 코드</label>
+    <input id="xlsx_category" type="text" name="category_code"
+           value="기타재화[35]" required>
+
+    <label for="xlsx_margin">마진율</label>
+    <input id="xlsx_margin" type="number" name="margin" min="0" max="0.99"
+           step="0.01" value="0.15" required>
+
+    <div class="actions">
+      <button type="submit">업로드</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>작업 목록</h2>
+  <table class="product-table">
+    <thead>
+      <tr>
+        <th scope="col">ID</th>
+        <th scope="col">유형</th>
+        <th scope="col">상태</th>
+        <th scope="col">등록</th>
+        <th scope="col">행/신규/갱신/건너뜀</th>
+        <th scope="col">오류</th>
+        <th scope="col">관리</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for job in jobs %}
+      <tr data-job-id="{{ job.id }}" data-status="{{ job.status }}">
+        <td>{{ job.id }}</td>
+        <td>{{ "검색" if job.source == "search" else "엑셀" }}</td>
+        <td class="job-status">{{ status_label(job.status) }}</td>
+        <td>{{ job.created_at }}</td>
+        <td>
+          {{ job.row_count }} / {{ job.inserted_count }} /
+          {{ job.updated_count }} / {{ job.skipped_count }}
+        </td>
+        <td class="job-error">{{ job.error or "-" }}</td>
+        <td>
+          {% if job.source == "search" and job.status in ("failed", "interrupted") %}
+          <form method="post"
+                action="{{ url_for('main.imports_retry', job_id=job.id) }}">
+            {{ csrf_field() }}
+            <button type="submit" class="secondary">재시도</button>
+          </form>
+          {% elif job.source == "xlsx" and job.status == "failed" %}
+          <span class="muted">파일 재업로드 필요</span>
+          {% else %}-{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="7" class="muted">등록된 작업이 없습니다.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<script>
+  (function () {
+    var rows = document.querySelectorAll("tr[data-job-id]");
+    var pending = Array.prototype.filter.call(rows, function (row) {
+      var status = row.getAttribute("data-status");
+      return status === "queued" || status === "running";
+    });
+    if (!pending.length) {
+      return;
+    }
+    var timer = setInterval(function () {
+      var settled = 0;
+      pending.forEach(function (row) {
+        var id = row.getAttribute("data-job-id");
+        fetch("/imports/" + id + "/status", { credentials: "same-origin" })
+          .then(function (response) { return response.ok ? response.json() : null; })
+          .then(function (data) {
+            if (!data) { return; }
+            if (data.status !== "queued" && data.status !== "running") {
+              settled += 1;
+            }
+          })
+          .catch(function () {});
+      });
+      if (settled === pending.length) {
+        clearInterval(timer);
+        window.location.reload();
+      }
+    }, 3000);
+  })();
+</script>
+{% endblock %}

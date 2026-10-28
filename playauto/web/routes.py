@@ -1,5 +1,7 @@
 import math
 import time
+import uuid
+from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from flask import (
@@ -7,6 +9,7 @@ from flask import (
     abort,
     current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -18,8 +21,12 @@ from playauto.db import delete_product
 
 from .auth import check_password, csrf_token, login_required
 from .queries import (
+    create_crawl_job,
+    get_job,
     get_product_detail,
+    list_jobs,
     list_products,
+    mark_stale_jobs,
     update_listing,
     update_product,
 )
@@ -291,3 +298,194 @@ def products_bulk_delete():
         deleted += delete_product(conn, product_id)
     flash(f"{deleted}개 상품을 삭제했습니다.")
     return redirect(url_for("main.products"))
+
+
+def _job_margin(value):
+    try:
+        margin = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not 0 <= margin < 1:
+        return None
+    return margin
+
+
+def _imports_context(error=None):
+    conn = _db()
+    mark_stale_jobs(conn)
+    return {"jobs": list_jobs(conn), "error": error}
+
+
+@bp.get("/imports")
+@login_required
+def imports():
+    return render_template("imports.html", **_imports_context())
+
+
+@bp.post("/imports")
+@login_required
+def imports_search_submit():
+    search_url = (request.form.get("search_url") or "").strip()
+    category_code = (request.form.get("category_code") or "").strip()
+    margin = _job_margin(request.form.get("margin"))
+
+    try:
+        from playauto.web.crawler import validate_search_url
+    except ImportError:
+        return (
+            render_template(
+                "imports.html",
+                **_imports_context(
+                    "검색 URL 검증 기능을 사용할 수 없습니다. "
+                    "엑셀 업로드를 이용해 주세요."
+                ),
+            ),
+            400,
+        )
+
+    try:
+        if not search_url:
+            raise ValueError("검색 URL을 입력해 주세요.")
+        validate_search_url(search_url)
+    except ValueError as exc:
+        return (
+            render_template("imports.html", **_imports_context(str(exc))),
+            400,
+        )
+
+    if not category_code:
+        return (
+            render_template(
+                "imports.html",
+                **_imports_context("카테고리 코드를 입력해 주세요."),
+            ),
+            400,
+        )
+    if margin is None:
+        return (
+            render_template(
+                "imports.html",
+                **_imports_context("마진율은 0 이상 1 미만이어야 합니다."),
+            ),
+            400,
+        )
+
+    conn = _db()
+    create_crawl_job(
+        conn,
+        source="search",
+        search_url=search_url,
+        category_code=category_code,
+        margin=margin,
+    )
+    flash("검색 수집 작업을 등록했습니다.")
+    return redirect(url_for("main.imports"))
+
+
+@bp.post("/imports/xlsx")
+@login_required
+def imports_xlsx_submit():
+    upload = request.files.get("file")
+    filename = (upload.filename or "") if upload is not None else ""
+    if not filename.lower().endswith(".xlsx"):
+        return (
+            render_template(
+                "imports.html",
+                **_imports_context("엑셀(.xlsx) 파일을 선택해 주세요."),
+            ),
+            400,
+        )
+
+    category_code = (request.form.get("category_code") or "").strip()
+    margin = _job_margin(request.form.get("margin"))
+    if not category_code:
+        return (
+            render_template(
+                "imports.html",
+                **_imports_context("카테고리 코드를 입력해 주세요."),
+            ),
+            400,
+        )
+    if margin is None:
+        return (
+            render_template(
+                "imports.html",
+                **_imports_context("마진율은 0 이상 1 미만이어야 합니다."),
+            ),
+            400,
+        )
+
+    upload_root = Path(current_app.config["UPLOAD_ROOT"])
+    upload_root.mkdir(parents=True, exist_ok=True)
+    target = upload_root / f"{uuid.uuid4().hex}.xlsx"
+
+    try:
+        upload.save(target)
+        create_crawl_job(
+            _db(),
+            source="xlsx",
+            xlsx_path=str(target),
+            category_code=category_code,
+            margin=margin,
+        )
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+
+    flash("엑셀 가져오기 작업을 등록했습니다.")
+    return redirect(url_for("main.imports"))
+
+
+@bp.post("/imports/<int:job_id>/retry")
+@login_required
+def imports_retry(job_id: int):
+    conn = _db()
+    job = get_job(conn, job_id)
+    if job is None:
+        abort(404)
+
+    if job["source"] != "search":
+        flash(
+            "엑셀 작업은 원본 파일이 삭제되어 재시도할 수 없습니다. "
+            "파일을 다시 업로드해 주세요.",
+            "error",
+        )
+        return redirect(url_for("main.imports"))
+
+    if job["status"] not in ("failed", "interrupted"):
+        flash("실패한 검색 작업만 재시도할 수 있습니다.", "error")
+        return redirect(url_for("main.imports"))
+
+    create_crawl_job(
+        conn,
+        source="search",
+        search_url=job["search_url"],
+        category_code=job["category_code"],
+        margin=job["margin"],
+    )
+    flash("검색 수집 작업을 다시 등록했습니다.")
+    return redirect(url_for("main.imports"))
+
+
+@bp.get("/imports/<int:job_id>/status")
+@login_required
+def imports_status(job_id: int):
+    job = get_job(_db(), job_id)
+    if job is None:
+        abort(404)
+    return jsonify(
+        {
+            "id": job["id"],
+            "status": job["status"],
+            "source": job["source"],
+            "created_at": job["created_at"],
+            "started_at": job["started_at"],
+            "finished_at": job["finished_at"],
+            "page_count": job["page_count"],
+            "row_count": job["row_count"],
+            "inserted_count": job["inserted_count"],
+            "updated_count": job["updated_count"],
+            "skipped_count": job["skipped_count"],
+            "error": job["error"],
+        }
+    )

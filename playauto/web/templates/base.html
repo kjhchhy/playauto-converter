@@ -17,6 +17,7 @@
     <nav class="nav">
       <a href="{{ url_for('main.dashboard') }}">대시보드</a>
       <a href="{{ url_for('main.products') }}">상품 목록</a>
+      <a href="{{ url_for('main.imports') }}">가져오기</a>
     </nav>
     {% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}

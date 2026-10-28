@@ -1,4 +1,31 @@
+import os
 import sqlite3
+from datetime import datetime, timedelta, timezone
+
+TERMINAL_JOB_STATUSES = ("succeeded", "failed", "interrupted", "canceled")
+
+CRAWL_JOB_FIELDS = (
+    "status",
+    "started_at",
+    "finished_at",
+    "page_count",
+    "row_count",
+    "inserted_count",
+    "updated_count",
+    "skipped_count",
+    "import_batch_id",
+    "error",
+    "worker_pid",
+    "search_url",
+    "xlsx_path",
+    "category_code",
+    "margin",
+)
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
 
 PRODUCT_FIELDS = (
     "name",
@@ -166,3 +193,95 @@ def update_listing(
     conn: sqlite3.Connection, listing_id: int, data: dict
 ) -> bool:
     return _update(conn, "listings", listing_id, data, LISTING_FIELDS)
+
+
+def create_crawl_job(
+    conn: sqlite3.Connection,
+    *,
+    source: str,
+    category_code: str,
+    margin: float,
+    search_url: str | None = None,
+    xlsx_path: str | None = None,
+) -> int:
+    with conn:
+        cursor = conn.execute(
+            "INSERT INTO crawl_jobs ("
+            "status, source, search_url, xlsx_path, category_code, margin"
+            ") VALUES ('queued', ?, ?, ?, ?, ?)",
+            (source, search_url, xlsx_path, category_code, margin),
+        )
+        return cursor.lastrowid
+
+
+def list_jobs(
+    conn: sqlite3.Connection, limit: int = 20
+) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM crawl_jobs ORDER BY id DESC LIMIT ?", (int(limit),)
+    ).fetchall()
+
+
+def get_job(
+    conn: sqlite3.Connection, job_id: int
+) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM crawl_jobs WHERE id = ?", (job_id,)
+    ).fetchone()
+
+
+def claim_next_job(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    now = _utc_now()
+    pid = os.getpid()
+    with conn:
+        row = conn.execute(
+            "UPDATE crawl_jobs SET status = 'running', started_at = ?, "
+            "worker_pid = ? "
+            "WHERE id = ("
+            "  SELECT id FROM crawl_jobs "
+            "  WHERE status = 'queued' ORDER BY id LIMIT 1"
+            ") RETURNING id",
+            (now, pid),
+        ).fetchone()
+    if row is None:
+        return None
+    return get_job(conn, row["id"])
+
+
+def mark_stale_jobs(
+    conn: sqlite3.Connection, *, older_than_minutes: int = 30
+) -> int:
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(minutes=older_than_minutes)
+    ).isoformat(timespec="seconds")
+    with conn:
+        cursor = conn.execute(
+            "UPDATE crawl_jobs SET status = 'failed', "
+            "error = 'worker 중단됨', finished_at = ? "
+            "WHERE status = 'running' "
+            "AND (started_at IS NULL OR started_at < ?)",
+            (_utc_now(), cutoff),
+        )
+        return cursor.rowcount
+
+
+def update_job(
+    conn: sqlite3.Connection, job_id: int, **fields
+) -> None:
+    updates = {
+        key: value for key, value in fields.items() if key in CRAWL_JOB_FIELDS
+    }
+    if not updates:
+        return
+    if (
+        updates.get("status") in TERMINAL_JOB_STATUSES
+        and "finished_at" not in updates
+    ):
+        updates["finished_at"] = _utc_now()
+
+    assignments = ", ".join(f"{key} = ?" for key in updates)
+    with conn:
+        conn.execute(
+            f"UPDATE crawl_jobs SET {assignments} WHERE id = ?",
+            [*updates.values(), job_id],
+        )
