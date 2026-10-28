@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% from "base.html" import csrf_field %}
+
+{% block title %}{{ product.name }} · 플레이오토 관리자{% endblock %}
+
+{% macro money(value) -%}
+{{ "{:,}".format(value) if value is not none else "-" }}
+{%- endmacro %}
+
+{% block content %}
+<header class="topbar">
+  <h1>{{ product.name }}</h1>
+  <form method="post" action="{{ url_for('main.logout') }}">
+    {{ csrf_field() }}
+    <button type="submit" class="secondary">로그아웃</button>
+  </form>
+</header>
+
+<section class="card">
+  <p><a href="{{ url_for('main.products') }}">← 상품 목록</a></p>
+  <p class="muted">
+    판매자코드: {{ listing.seller_code if listing else "-" }} ·
+    마켓가격: {{ money(listing.market_price) if listing else "-" }} ·
+    <a href="{{ product.order_url }}" target="_blank" rel="noopener">원본 URL</a>
+  </p>
+</section>
+
+<section class="card">
+  <h2>상품 정보 수정</h2>
+  <form method="post" action="{{ url_for('main.product_update', product_id=product.id) }}">
+    {{ csrf_field() }}
+
+    <label for="name">상품명</label>
+    <input id="name" type="text" name="name" value="{{ product.name }}">
+
+    <label for="brand">브랜드</label>
+    <input id="brand" type="text" name="brand" value="{{ product.brand or '' }}">
+
+    <label for="manufacturer">제조사</label>
+    <input id="manufacturer" type="text" name="manufacturer" value="{{ product.manufacturer or '' }}">
+
+    <label for="model">모델명</label>
+    <input id="model" type="text" name="model" value="{{ product.model or '' }}">
+
+    <label for="category_code">카테고리 코드</label>
+    <input id="category_code" type="text" name="category_code" value="{{ product.category_code }}">
+
+    <label for="keywords">키워드</label>
+    <input id="keywords" type="text" name="keywords" value="{{ product.keywords or '' }}">
+
+    <label for="detail">상세설명</label>
+    <textarea id="detail" name="detail" rows="4">{{ product.detail or '' }}</textarea>
+
+    <h2>판매 정보 수정</h2>
+    {% if listing %}
+    <label for="sale_name">판매명</label>
+    <input id="sale_name" type="text" name="sale_name" value="{{ listing.sale_name }}">
+
+    <label for="margin_rate">마진율 (0 이상 1 미만)</label>
+    <input id="margin_rate" type="number" name="margin_rate" step="0.01" min="0" max="0.99"
+           value="{{ listing.margin_rate if listing.margin_rate is not none else '' }}">
+
+    <label for="unit_price_visible">단가 표시</label>
+    <input id="unit_price_visible" type="text" name="unit_price_visible" value="{{ listing.unit_price_visible or '' }}">
+
+    <label for="display_capacity">표시 용량</label>
+    <input id="display_capacity" type="text" name="display_capacity" value="{{ listing.display_capacity or '' }}">
+
+    <label for="display_unit">표시 단위</label>
+    <input id="display_unit" type="text" name="display_unit" value="{{ listing.display_unit or '' }}">
+
+    <label for="pack_config">포장 구성</label>
+    <input id="pack_config" type="text" name="pack_config" value="{{ listing.pack_config or '' }}">
+
+    <label for="capacity_per_unit">단위 용량</label>
+    <input id="capacity_per_unit" type="text" name="capacity_per_unit" value="{{ listing.capacity_per_unit or '' }}">
+    {% else %}
+    <p class="muted">활성 판매 정보가 없습니다.</p>
+    {% endif %}
+
+    <button type="submit">저장</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>가격 이력</h2>
+  <table class="history-table">
+    <thead>
+      <tr>
+        <th scope="col">관측 시각</th>
+        <th scope="col">가격</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in history %}
+      <tr>
+        <td>{{ row.observed_at }}</td>
+        <td>{{ money(row.price) }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="2" class="muted">가격 이력이 없습니다.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <form method="post" action="{{ url_for('main.product_delete', product_id=product.id) }}">
+    {{ csrf_field() }}
+    <button type="submit" class="danger">이 상품 삭제</button>
+  </form>
+</section>
+{% endblock %}

@@ -13,6 +13,17 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   {%- endmacro %}
   <main class="container">
+    {% if session.get('logged_in') %}
+    <nav class="nav">
+      <a href="{{ url_for('main.dashboard') }}">대시보드</a>
+      <a href="{{ url_for('main.products') }}">상품 목록</a>
+    </nav>
+    {% endif %}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+      <p class="flash {{ category }}">{{ message }}</p>
+      {% endfor %}
+    {% endwith %}
     {% block content %}{% endblock %}
   </main>
 </body>
