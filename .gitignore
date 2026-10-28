@@ -9,3 +9,4 @@ out/
 *.db-wal
 *.xlsx
 *.log
+.worktrees/
