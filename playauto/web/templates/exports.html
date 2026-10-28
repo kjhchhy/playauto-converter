@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% from "base.html" import csrf_field %}
+
+{% block title %}내보내기 · 플레이오토 관리자{% endblock %}
+
+{% block content %}
+<header class="topbar">
+  <h1>엑셀 내보내기</h1>
+  <form method="post" action="{{ url_for('main.logout') }}">
+    {{ csrf_field() }}
+    <button type="submit" class="secondary">로그아웃</button>
+  </form>
+</header>
+
+{% if error %}
+<p class="flash error">{{ error }}</p>
+{% endif %}
+
+<section class="card">
+  <h2>기준 엑셀</h2>
+  {% if reference.exists %}
+  <dl class="reference-info">
+    <dt>파일명</dt>
+    <dd>{{ reference.original_name or "기준 엑셀" }}</dd>
+    <dt>업로드 시각</dt>
+    <dd>{{ reference.uploaded_at or "-" }}</dd>
+    <dt>해시</dt>
+    <dd>{{ reference.sha256[:12] if reference.sha256 else "-" }}</dd>
+  </dl>
+  {% else %}
+  <p class="muted">등록된 기준 엑셀이 없습니다. 먼저 엑셀을 업로드해 주세요.</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('main.exports_reference_submit') }}"
+        enctype="multipart/form-data" class="filters">
+    {{ csrf_field() }}
+    <label for="reference_file">기준 엑셀 파일 (.xlsx)</label>
+    <input id="reference_file" type="file" name="file" accept=".xlsx" required>
+    <div class="actions">
+      <button type="submit" class="secondary">
+        {{ "교체" if reference.exists else "업로드" }}
+      </button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>엑셀 생성</h2>
+  <form method="post" action="{{ url_for('main.exports_submit') }}" class="filters">
+    {{ csrf_field() }}
+    <label for="option">상품분류 옵션</label>
+    <select id="option" name="option" required>
+      {% for option in options %}
+      <option value="{{ option }}"
+              {% if option == default_option %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="run_date">날짜</label>
+    <input id="run_date" type="date" name="run_date">
+
+    <label class="checkbox" for="coupang_single">
+      <input id="coupang_single" type="checkbox" name="coupang_single" value="1">
+      쿠팡 단일 파일 생성
+    </label>
+
+    <label for="commission_gmarket">지마켓 수수료 (%)</label>
+    <input id="commission_gmarket" type="number" name="commission_gmarket"
+           min="0" max="99.99" step="0.01" value="12.0">
+
+    <label for="commission_smartstore">스마트스토어 수수료 (%)</label>
+    <input id="commission_smartstore" type="number" name="commission_smartstore"
+           min="0" max="99.99" step="0.01" value="6.0">
+
+    <label for="commission_coupang">쿠팡 수수료 (%)</label>
+    <input id="commission_coupang" type="number" name="commission_coupang"
+           min="0" max="99.99" step="0.01" value="10.0">
+
+    <div class="actions">
+      <button type="submit" {% if not reference.exists %}disabled{% endif %}>
+        엑셀 생성
+      </button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>최근 export</h2>
+  <table class="product-table">
+    <thead>
+      <tr>
+        <th scope="col">생성 시각</th>
+        <th scope="col">파일</th>
+        <th scope="col">관리</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for export in exports %}
+      <tr>
+        <td>{{ export.created_at }}</td>
+        <td>
+          {% for file in export.files %}
+          <a href="{{ url_for('main.export_download', export_id=export.export_id, filename=file.kind) }}">
+            {{ file.name }}
+          </a>
+          {% else %}
+          <span class="muted">파일 없음</span>
+          {% endfor %}
+        </td>
+        <td>
+          <form method="post"
+                action="{{ url_for('main.export_delete', export_id=export.export_id) }}">
+            {{ csrf_field() }}
+            <button type="submit" class="secondary">삭제</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="3" class="muted">생성된 export가 없습니다.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

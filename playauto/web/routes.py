@@ -1,6 +1,7 @@
 import math
 import time
 import uuid
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -13,20 +14,31 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_from_directory,
     session,
     url_for,
 )
 
+from playauto.constants import PRODUCT_CODE_META, meta_for_option
 from playauto.db import delete_product
 
 from .auth import check_password, csrf_token, login_required
+from .export_service import (
+    delete_export,
+    export_file,
+    export_to_dir,
+    list_exports,
+    save_reference,
+)
 from .queries import (
     create_crawl_job,
     get_job,
     get_product_detail,
+    get_setting,
     list_jobs,
     list_products,
     mark_stale_jobs,
+    set_setting,
     update_listing,
     update_product,
 )
@@ -489,3 +501,200 @@ def imports_status(job_id: int):
             "error": job["error"],
         }
     )
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _upload_basename(filename: str) -> str:
+    return (filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _reference_context(conn) -> dict:
+    return {
+        "original_name": get_setting(conn, "reference_original_name"),
+        "uploaded_at": get_setting(conn, "reference_uploaded_at"),
+        "sha256": get_setting(conn, "reference_sha256"),
+        "exists": Path(current_app.config["REFERENCE_PATH"]).is_file(),
+    }
+
+
+def _exports_context(error=None) -> dict:
+    conn = _db()
+    return {
+        "reference": _reference_context(conn),
+        "exports": list_exports(current_app.config["EXPORT_ROOT"]),
+        "options": list(PRODUCT_CODE_META),
+        "default_option": "기타재화[35]",
+        "error": error,
+    }
+
+
+@bp.get("/exports")
+@login_required
+def exports():
+    return render_template("exports.html", **_exports_context())
+
+
+@bp.post("/exports/reference")
+@login_required
+def exports_reference_submit():
+    upload = request.files.get("file")
+    original_name = _upload_basename(
+        upload.filename if upload is not None else ""
+    )
+    if not original_name.lower().endswith(".xlsx"):
+        return (
+            render_template(
+                "exports.html",
+                **_exports_context("엑셀(.xlsx) 파일을 선택해 주세요."),
+            ),
+            400,
+        )
+
+    upload_root = Path(current_app.config["UPLOAD_ROOT"])
+    upload_root.mkdir(parents=True, exist_ok=True)
+    temporary = upload_root / f"reference-{uuid.uuid4().hex}.xlsx"
+    reference_path = Path(current_app.config["REFERENCE_PATH"])
+
+    try:
+        upload.save(temporary)
+        info = save_reference(temporary, reference_path)
+        conn = _db()
+        set_setting(conn, "reference_original_name", original_name)
+        set_setting(conn, "reference_uploaded_at", _utc_now())
+        set_setting(conn, "reference_sha256", info["sha256"])
+    except ValueError as exc:
+        return (
+            render_template(
+                "exports.html",
+                **_exports_context(f"기준 엑셀을 저장하지 못했습니다: {exc}"),
+            ),
+            400,
+        )
+    finally:
+        temporary.unlink(missing_ok=True)
+
+    flash("기준 엑셀을 저장했습니다.")
+    return redirect(url_for("main.exports"))
+
+
+def _form_commission():
+    default = {"지마켓": 12.0, "스마트스토어": 6.0, "쿠팡": 10.0}
+    fields = {
+        "지마켓": "commission_gmarket",
+        "스마트스토어": "commission_smartstore",
+        "쿠팡": "commission_coupang",
+    }
+    commission = {}
+    for label, field in fields.items():
+        raw = (request.form.get(field) or "").strip()
+        if not raw:
+            commission[label] = default[label]
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        if not 0 <= value < 100:
+            return None
+        commission[label] = value
+    return commission
+
+
+@bp.post("/exports")
+@login_required
+def exports_submit():
+    option = (request.form.get("option") or "").strip()
+    try:
+        meta_for_option(option)
+    except ValueError as exc:
+        return (
+            render_template(
+                "exports.html", **_exports_context(str(exc))
+            ),
+            400,
+        )
+
+    run_date = None
+    raw_date = (request.form.get("run_date") or "").strip()
+    if raw_date:
+        try:
+            run_date = date.fromisoformat(raw_date)
+        except ValueError:
+            return (
+                render_template(
+                    "exports.html",
+                    **_exports_context("날짜 형식이 올바르지 않습니다."),
+                ),
+                400,
+            )
+
+    commission = _form_commission()
+    if commission is None:
+        return (
+            render_template(
+                "exports.html",
+                **_exports_context(
+                    "수수료는 0 이상 100 미만의 숫자여야 합니다."
+                ),
+            ),
+            400,
+        )
+
+    reference_path = Path(current_app.config["REFERENCE_PATH"])
+    if not reference_path.is_file():
+        flash("기준 엑셀이 없어 엑셀을 생성할 수 없습니다.", "error")
+        return redirect(url_for("main.exports"))
+
+    try:
+        export_to_dir(
+            current_app.config["DATABASE"],
+            reference_path,
+            current_app.config["EXPORT_ROOT"],
+            option=option,
+            run_date=run_date,
+            coupang_single=bool(request.form.get("coupang_single")),
+            commission=commission,
+        )
+    except ValueError as exc:
+        flash(f"엑셀을 생성하지 못했습니다: {exc}", "error")
+        return redirect(url_for("main.exports"))
+
+    flash("엑셀을 생성했습니다.")
+    return redirect(url_for("main.exports"))
+
+
+@bp.get("/exports/<export_id>/<filename>")
+@login_required
+def export_download(export_id: str, filename: str):
+    if filename not in ("setting", "single", "general"):
+        abort(404)
+    if not export_id or export_id in (".", ".."):
+        abort(404)
+    if "/" in export_id or "\\" in export_id or ".." in export_id:
+        abort(404)
+
+    directory = Path(current_app.config["EXPORT_ROOT"]) / export_id
+    if not directory.is_dir():
+        abort(404)
+    target = export_file(directory, filename)
+    if target is None:
+        abort(404)
+    return send_from_directory(
+        str(directory.resolve()),
+        target.name,
+        as_attachment=True,
+        download_name=target.name,
+    )
+
+
+@bp.post("/exports/<export_id>/delete")
+@login_required
+def export_delete(export_id: str):
+    if not delete_export(current_app.config["EXPORT_ROOT"], export_id):
+        abort(404)
+    flash("export를 삭제했습니다.")
+    return redirect(url_for("main.exports"))
+

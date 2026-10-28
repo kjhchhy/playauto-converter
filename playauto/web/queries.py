@@ -265,6 +265,26 @@ def mark_stale_jobs(
         return cursor.rowcount
 
 
+def get_setting(
+    conn: sqlite3.Connection, key: str, default=None
+) -> str | None:
+    row = conn.execute(
+        "SELECT value FROM app_settings WHERE key = ?", (key,)
+    ).fetchone()
+    return row[0] if row is not None else default
+
+
+def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+    with conn:
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET "
+            "value = excluded.value, updated_at = excluded.updated_at",
+            (key, str(value), _utc_now()),
+        )
+
+
 def update_job(
     conn: sqlite3.Connection, job_id: int, **fields
 ) -> None:
