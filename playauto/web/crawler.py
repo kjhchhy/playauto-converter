@@ -1,13 +1,189 @@
+import os
 import re
-from urllib.parse import parse_qs, urlparse
+from pathlib import Path
+from urllib.parse import parse_qs, urljoin, urlparse
 
 from playauto.db import CrawlData, CrawlRow, parse_price
 
 GMARKET_SEARCH_HOST = "www.gmarket.co.kr"
 GMARKET_SEARCH_PATH = "/n/stardelivery/search"
 
+CARD_SELECTOR = ".box__itemcard"
+CARD_WAIT_MS = 30000
+DEFAULT_PROFILE = Path("data/browser-profile")
+BLOCKED_MARKERS = ("just a moment", "verify you are human", "cloudflare")
+BLOCKED_MESSAGE = "Gmarket이 자동 접속을 차단했습니다. 잠시 후 다시 시도해 주세요."
+
 _CAPACITY_RE = re.compile(r"^(\d+(?:\.\d+)?)\s*(ml|g|개)$", re.IGNORECASE)
 _DROP_NAME_LINES = {"공식", "상품"}
+
+
+class CrawlBlockedError(RuntimeError):
+    """Raised when Gmarket serves an anti-bot interstitial page."""
+
+
+def is_blocked_page(title: str, body_text: str, card_count: int) -> bool:
+    if card_count:
+        return False
+    haystack = f"{title or ''}\n{body_text or ''}".lower()
+    return any(marker in haystack for marker in BLOCKED_MARKERS)
+
+
+EXTRACT_CARDS_JS = """
+() => {
+  const cards = [];
+  document.querySelectorAll('.box__itemcard').forEach((card) => {
+    const nameEl = card.querySelector('.item_name');
+    let name = null;
+    if (nameEl) {
+      const clone = nameEl.cloneNode(true);
+      clone.querySelectorAll('.box__brand').forEach((el) => el.remove());
+      name = (clone.textContent || '').trim();
+    }
+    const brandEl = card.querySelector('.text__brand');
+    const priceEl = card.querySelector('.box__price .text__value');
+    const imgEl = card.querySelector('.item_image img');
+    const linkEl = card.querySelector('a.link__itemcard');
+    cards.push({
+      name: name,
+      brand: brandEl ? (brandEl.textContent || '').trim() : null,
+      price: priceEl ? (priceEl.textContent || '').trim() : null,
+      image: imgEl
+        ? (imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || null)
+        : null,
+      href: linkEl ? linkEl.getAttribute('href') : null,
+    });
+  });
+  return cards;
+}
+"""
+
+_NEXT_PAGE_JS = """
+() => Array.from(document.querySelectorAll('.link__page_number'))
+  .map((a) => a.getAttribute('href'))
+  .filter((href) => href && !href.toLowerCase().startsWith('javascript:'))
+"""
+
+
+def extract_cards(page) -> list[dict]:
+    return page.evaluate(EXTRACT_CARDS_JS)
+
+
+def _page_title_body(page) -> tuple[str, str]:
+    try:
+        title = page.title()
+    except Exception:  # noqa: BLE001 - page may be mid-navigation
+        title = ""
+    try:
+        body = page.inner_text("body")
+    except Exception:  # noqa: BLE001 - body may be missing
+        body = ""
+    return title or "", body or ""
+
+
+def _profile_path(browser_profile) -> Path:
+    if browser_profile:
+        path = Path(browser_profile)
+    else:
+        path = Path(os.environ.get("BROWSER_PROFILE") or DEFAULT_PROFILE)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _next_page_url(page, visited: set[str]) -> str | None:
+    try:
+        hrefs = page.evaluate(_NEXT_PAGE_JS)
+    except Exception:  # noqa: BLE001 - pagination is best effort
+        return None
+    current = getattr(page, "url", "") or ""
+    for href in hrefs or ():
+        absolute = urljoin(current, href)
+        if absolute not in visited:
+            return absolute
+    return None
+
+
+def fetch_search_cards(
+    search_url: str,
+    *,
+    max_pages: int = 50,
+    max_rows: int = 5000,
+    browser_profile=None,
+) -> list[dict]:
+    from playwright.sync_api import sync_playwright
+
+    profile = _profile_path(browser_profile)
+    playwright = sync_playwright().start()
+    context = None
+    try:
+        context = playwright.chromium.launch_persistent_context(
+            user_data_dir=str(profile),
+            headless=True,
+            locale="ko-KR",
+            timezone_id="Asia/Seoul",
+        )
+        page = context.pages[0] if context.pages else context.new_page()
+        page.goto(search_url, wait_until="domcontentloaded")
+
+        cards: list[dict] = []
+        try:
+            page.wait_for_selector(CARD_SELECTOR, timeout=CARD_WAIT_MS)
+        except Exception:  # noqa: BLE001 - timeout or blocked interstitial
+            title, body = _page_title_body(page)
+            if is_blocked_page(title, body, 0):
+                raise CrawlBlockedError(BLOCKED_MESSAGE)
+            return cards
+
+        visited: set[str] = set()
+        pagination_visited: set[str] = {getattr(page, "url", "") or ""}
+        pages_loaded = 0
+        while pages_loaded < max_pages:
+            pages_loaded += 1
+            title, body = _page_title_body(page)
+            page_cards = extract_cards(page)
+            if not page_cards and is_blocked_page(title, body, 0):
+                raise CrawlBlockedError(BLOCKED_MESSAGE)
+
+            new_cards = []
+            for card in page_cards:
+                href = str(card.get("href") or "")
+                if href and href in visited:
+                    continue
+                if href:
+                    visited.add(href)
+                new_cards.append(card)
+
+            if not new_cards:
+                break
+            cards.extend(new_cards)
+            if len(cards) >= max_rows or pages_loaded >= max_pages:
+                break
+
+            next_url = _next_page_url(page, pagination_visited)
+            if not next_url:
+                break
+            pagination_visited.add(next_url)
+            try:
+                page.goto(next_url, wait_until="domcontentloaded")
+                page.wait_for_selector(CARD_SELECTOR, timeout=CARD_WAIT_MS)
+            except Exception:  # noqa: BLE001 - stop pagination on failure
+                title, body = _page_title_body(page)
+                try:
+                    remaining = extract_cards(page)
+                except Exception:  # noqa: BLE001 - page may be unusable
+                    remaining = []
+                if not remaining and is_blocked_page(title, body, 0):
+                    raise CrawlBlockedError(BLOCKED_MESSAGE)
+                break
+
+        return cards[:max_rows]
+    finally:
+        if context is not None:
+            try:
+                context.close()
+            except Exception:  # noqa: BLE001 - cleanup must not mask errors
+                pass
+        playwright.stop()
 
 
 def validate_search_url(url: str) -> None:
