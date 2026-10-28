@@ -1,0 +1,23 @@
+[Unit]
+Description=Playauto crawl worker
+After=network.target playauto-web.service
+
+[Service]
+User=playauto
+Group=playauto
+WorkingDirectory=/opt/playauto
+Environment=PYTHONPATH=/opt/playauto:/opt/playauto/vendor
+EnvironmentFile=/etc/playauto.env
+ExecStart=/opt/playauto/.venv/bin/python -m playauto.web.worker
+Restart=always
+RestartSec=5
+
+# 보안 강화: worker는 data/ 아래 DB, export, browser-profile에만 쓴다.
+# /home의 Playwright 브라우저 캐시는 계속 읽을 수 있어야 한다.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/playauto/data
+
+[Install]
+WantedBy=multi-user.target
