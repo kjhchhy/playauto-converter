@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.parse import urlencode
 
 from werkzeug.security import generate_password_hash
 
@@ -89,3 +90,28 @@ class AuthTests(unittest.TestCase):
             "/login", data={"password": "wrong", "csrf_token": token}
         )
         self.assertEqual(response.status_code, 429)
+
+    def test_login_next_rejects_unsafe_targets(self):
+        unsafe_targets = [
+            "/%09/evil.com",
+            "//evil.com",
+            "/\t/evil.com",
+            "/\n/evil.com",
+            "/\r/evil.com",
+            "/\\evil.com",
+            "https://evil.com",
+        ]
+        for target in unsafe_targets:
+            self.client.get("/login")
+            with self.client.session_transaction() as session:
+                token = session["_csrf_token"]
+            body = urlencode(
+                {"password": "secret", "csrf_token": token, "next": target}
+            )
+            response = self.client.post(
+                "/login",
+                data=body,
+                content_type="application/x-www-form-urlencoded",
+            )
+            self.assertEqual(response.status_code, 302, target)
+            self.assertEqual(response.headers["Location"], "/", target)

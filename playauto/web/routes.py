@@ -1,4 +1,5 @@
 import time
+from urllib.parse import unquote, urlsplit
 
 from flask import (
     Blueprint,
@@ -61,8 +62,28 @@ def _limiter() -> LoginRateLimiter:
 
 
 def _safe_next(target: str | None) -> str:
+    fallback = url_for("main.dashboard")
     if not target or not target.startswith("/") or target.startswith("//"):
-        return url_for("main.dashboard")
+        return fallback
+    if "\\" in target:
+        return fallback
+
+    decoded = unquote(target)
+    if any(
+        ch == "\\" or ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F
+        for ch in decoded
+    ):
+        return fallback
+    if not decoded.startswith("/") or decoded.startswith("//"):
+        return fallback
+
+    try:
+        parts = urlsplit(decoded)
+    except ValueError:
+        return fallback
+    if parts.scheme or parts.netloc:
+        return fallback
+
     return target
 
 
