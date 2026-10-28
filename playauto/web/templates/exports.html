@@ -66,15 +66,18 @@
 
     <label for="commission_gmarket">지마켓 수수료 (%)</label>
     <input id="commission_gmarket" type="number" name="commission_gmarket"
-           min="0" max="99.99" step="0.01" value="12.0">
+           min="0" max="99.99" step="0.01"
+           value="{{ commission_defaults.commission_gmarket }}">
 
     <label for="commission_smartstore">스마트스토어 수수료 (%)</label>
     <input id="commission_smartstore" type="number" name="commission_smartstore"
-           min="0" max="99.99" step="0.01" value="6.0">
+           min="0" max="99.99" step="0.01"
+           value="{{ commission_defaults.commission_smartstore }}">
 
     <label for="commission_coupang">쿠팡 수수료 (%)</label>
     <input id="commission_coupang" type="number" name="commission_coupang"
-           min="0" max="99.99" step="0.01" value="10.0">
+           min="0" max="99.99" step="0.01"
+           value="{{ commission_defaults.commission_coupang }}">
 
     <div class="actions">
       <button type="submit" {% if not reference.exists %}disabled{% endif %}>

@@ -266,23 +266,31 @@ def mark_stale_jobs(
 
 
 def get_setting(
-    conn: sqlite3.Connection, key: str, default=None
+    conn: sqlite3.Connection, key: str, default: str | None = None
 ) -> str | None:
+    """Return the stored value, or ``default`` unchanged when absent."""
     row = conn.execute(
         "SELECT value FROM app_settings WHERE key = ?", (key,)
     ).fetchone()
     return row[0] if row is not None else default
 
 
-def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+def set_settings(conn: sqlite3.Connection, values: dict[str, str]) -> None:
+    rows = [(str(key), str(value), _utc_now()) for key, value in values.items()]
+    if not rows:
+        return
     with conn:
-        conn.execute(
+        conn.executemany(
             "INSERT INTO app_settings (key, value, updated_at) "
             "VALUES (?, ?, ?) "
             "ON CONFLICT(key) DO UPDATE SET "
             "value = excluded.value, updated_at = excluded.updated_at",
-            (key, str(value), _utc_now()),
+            rows,
         )
+
+
+def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+    set_settings(conn, {key: value})
 
 
 def update_job(

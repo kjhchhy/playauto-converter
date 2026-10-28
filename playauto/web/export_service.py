@@ -41,7 +41,9 @@ def validate_reference(path: str | Path) -> None:
     finally:
         workbook.close()
     if missing:
-        raise ValueError(f"필수 시트 누락: {missing}")
+        raise ValueError(
+            "필수 시트가 없습니다: " + ", ".join(missing)
+        )
 
 
 def save_reference(src: str | Path, dest: str | Path) -> dict:

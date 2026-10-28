@@ -1,4 +1,6 @@
 import math
+import os
+import sqlite3
 import time
 import uuid
 from datetime import date, datetime, timezone
@@ -38,7 +40,7 @@ from .queries import (
     list_jobs,
     list_products,
     mark_stale_jobs,
-    set_setting,
+    set_settings,
     update_listing,
     update_product,
 )
@@ -520,6 +522,36 @@ def _reference_context(conn) -> dict:
     }
 
 
+COMMISSION_FALLBACK = {
+    "commission_gmarket": 12.0,
+    "commission_smartstore": 6.0,
+    "commission_coupang": 10.0,
+}
+
+COMMISSION_LABELS = {
+    "commission_gmarket": "지마켓",
+    "commission_smartstore": "스마트스토어",
+    "commission_coupang": "쿠팡",
+}
+
+
+def _setting_float(conn, key: str, fallback: float) -> float:
+    raw = get_setting(conn, key)
+    if raw is None:
+        return fallback
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _commission_defaults(conn) -> dict:
+    return {
+        key: _setting_float(conn, key, fallback)
+        for key, fallback in COMMISSION_FALLBACK.items()
+    }
+
+
 def _exports_context(error=None) -> dict:
     conn = _db()
     return {
@@ -527,8 +559,24 @@ def _exports_context(error=None) -> dict:
         "exports": list_exports(current_app.config["EXPORT_ROOT"]),
         "options": list(PRODUCT_CODE_META),
         "default_option": "기타재화[35]",
+        "commission_defaults": _commission_defaults(conn),
         "error": error,
     }
+
+
+def _restore_reference(path: Path, previous: bytes | None) -> None:
+    try:
+        if previous is None:
+            path.unlink(missing_ok=True)
+            return
+        temporary = path.with_name(f"{path.name}.restore-{uuid.uuid4().hex}")
+        try:
+            temporary.write_bytes(previous)
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    except OSError:
+        current_app.logger.exception("failed to restore reference workbook")
 
 
 @bp.get("/exports")
@@ -559,18 +607,38 @@ def exports_reference_submit():
     reference_path = Path(current_app.config["REFERENCE_PATH"])
 
     try:
-        upload.save(temporary)
-        info = save_reference(temporary, reference_path)
-        conn = _db()
-        set_setting(conn, "reference_original_name", original_name)
-        set_setting(conn, "reference_uploaded_at", _utc_now())
-        set_setting(conn, "reference_sha256", info["sha256"])
-    except ValueError as exc:
+        previous = reference_path.read_bytes() if reference_path.is_file() else None
+    except OSError:
         return (
             render_template(
                 "exports.html",
-                **_exports_context(f"기준 엑셀을 저장하지 못했습니다: {exc}"),
+                **_exports_context(
+                    "기존 기준 엑셀을 읽을 수 없어 교체하지 못했습니다."
+                ),
             ),
+            400,
+        )
+
+    try:
+        upload.save(temporary)
+        info = save_reference(temporary, reference_path)
+        set_settings(
+            _db(),
+            {
+                "reference_original_name": original_name,
+                "reference_uploaded_at": _utc_now(),
+                "reference_sha256": info["sha256"],
+            },
+        )
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        _restore_reference(reference_path, previous)
+        if isinstance(exc, ValueError):
+            message = f"기준 엑셀을 저장하지 못했습니다: {exc}"
+        else:
+            current_app.logger.exception("reference upload failed")
+            message = "기준 엑셀을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."
+        return (
+            render_template("exports.html", **_exports_context(message)),
             400,
         )
     finally:
@@ -580,18 +648,13 @@ def exports_reference_submit():
     return redirect(url_for("main.exports"))
 
 
-def _form_commission():
-    default = {"지마켓": 12.0, "스마트스토어": 6.0, "쿠팡": 10.0}
-    fields = {
-        "지마켓": "commission_gmarket",
-        "스마트스토어": "commission_smartstore",
-        "쿠팡": "commission_coupang",
-    }
+def _form_commission(conn):
+    defaults = _commission_defaults(conn)
     commission = {}
-    for label, field in fields.items():
+    for field, label in COMMISSION_LABELS.items():
         raw = (request.form.get(field) or "").strip()
         if not raw:
-            commission[label] = default[label]
+            commission[label] = defaults[field]
             continue
         try:
             value = float(raw)
@@ -631,7 +694,7 @@ def exports_submit():
                 400,
             )
 
-    commission = _form_commission()
+    commission = _form_commission(_db())
     if commission is None:
         return (
             render_template(
@@ -661,6 +724,13 @@ def exports_submit():
     except ValueError as exc:
         flash(f"엑셀을 생성하지 못했습니다: {exc}", "error")
         return redirect(url_for("main.exports"))
+    except Exception:  # noqa: BLE001 - route must not leak a traceback
+        current_app.logger.exception("export generation failed")
+        flash(
+            "엑셀을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+            "error",
+        )
+        return redirect(url_for("main.exports"))
 
     flash("엑셀을 생성했습니다.")
     return redirect(url_for("main.exports"))
@@ -677,9 +747,12 @@ def export_download(export_id: str, filename: str):
         abort(404)
 
     directory = Path(current_app.config["EXPORT_ROOT"]) / export_id
-    if not directory.is_dir():
+    try:
+        if not directory.is_dir():
+            abort(404)
+        target = export_file(directory, filename)
+    except OSError:
         abort(404)
-    target = export_file(directory, filename)
     if target is None:
         abort(404)
     return send_from_directory(
