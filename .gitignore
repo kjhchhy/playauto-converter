@@ -10,3 +10,4 @@ out/
 *.xlsx
 *.log
 .worktrees/
+.venv/

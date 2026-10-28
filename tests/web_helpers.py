@@ -1,7 +1,10 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
+from werkzeug.security import generate_password_hash
+
 from playauto.db import connect, ensure_schema
+from playauto.web.app import create_app
 
 
 def new_conn(tmpdir):
@@ -58,3 +61,36 @@ def seed_product(
     )
     conn.commit()
     return product_id, listing_id
+
+
+def make_web_app(tmpdir, password="secret"):
+    db_path = Path(tmpdir) / "test.db"
+    app = create_app(
+        {
+            "TESTING": True,
+            "SECRET_KEY": "test-secret",
+            "ADMIN_PASSWORD_HASH": generate_password_hash(password),
+            "DATABASE": str(db_path),
+            "REFERENCE_PATH": str(Path(tmpdir) / "current.xlsx"),
+            "EXPORT_ROOT": str(Path(tmpdir) / "exports"),
+            "UPLOAD_ROOT": str(Path(tmpdir) / "uploads"),
+            "BROWSER_PROFILE": str(Path(tmpdir) / "browser"),
+            "EXPORT_TTL_HOURS": 24,
+        }
+    )
+    return app, db_path
+
+
+def login(client, password="secret"):
+    client.get("/login")
+    with client.session_transaction() as session:
+        token = session["_csrf_token"]
+    return client.post(
+        "/login", data={"password": password, "csrf_token": token}
+    )
+
+
+def post_with_csrf(client, url, data):
+    with client.session_transaction() as session:
+        token = session["_csrf_token"]
+    return client.post(url, data={**data, "csrf_token": token})

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% from "base.html" import csrf_field %}
+
+{% block title %}대시보드 · 플레이오토 관리자{% endblock %}
+
+{% block content %}
+<header class="topbar">
+  <h1>대시보드</h1>
+  <form method="post" action="{{ url_for('main.logout') }}">
+    {{ csrf_field() }}
+    <button type="submit" class="secondary">로그아웃</button>
+  </form>
+</header>
+
+<section class="card">
+  <p>플레이오토 관리자에 로그인했습니다.</p>
+</section>
+{% endblock %}
