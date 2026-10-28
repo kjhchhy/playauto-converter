@@ -127,24 +127,46 @@
     if (!pending.length) {
       return;
     }
+
+    var polling = false;
+
+    function jobStatus(row) {
+      var id = row.getAttribute("data-job-id");
+      return fetch("/imports/" + id + "/status", {
+        credentials: "same-origin",
+      })
+        .then(function (response) {
+          if (!response.ok) {
+            return "unknown";
+          }
+          return response.json().then(function (data) {
+            return data.status;
+          });
+        })
+        .catch(function () {
+          return "unknown";
+        });
+    }
+
     var timer = setInterval(function () {
-      var settled = 0;
-      pending.forEach(function (row) {
-        var id = row.getAttribute("data-job-id");
-        fetch("/imports/" + id + "/status", { credentials: "same-origin" })
-          .then(function (response) { return response.ok ? response.json() : null; })
-          .then(function (data) {
-            if (!data) { return; }
-            if (data.status !== "queued" && data.status !== "running") {
-              settled += 1;
-            }
-          })
-          .catch(function () {});
-      });
-      if (settled === pending.length) {
-        clearInterval(timer);
-        window.location.reload();
+      if (polling) {
+        return;
       }
+      polling = true;
+      Promise.all(pending.map(jobStatus))
+        .then(function (statuses) {
+          var active = statuses.some(function (status) {
+            return status === "queued" || status === "running" || status === "unknown";
+          });
+          if (!active) {
+            clearInterval(timer);
+            window.location.reload();
+          }
+        })
+        .catch(function () {})
+        .then(function () {
+          polling = false;
+        });
     }, 3000);
   })();
 </script>

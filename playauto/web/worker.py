@@ -16,23 +16,20 @@ CLEANUP_SECONDS = 60 * 60
 
 def _search_crawl(job, crawler):
     try:
-        from playauto.web.crawler import fetch_search_cards, normalize_cards
+        from playauto.web import crawler as crawler_mod
     except ImportError as exc:
+        raise RuntimeError("카드 정규화 모듈을 사용할 수 없습니다.") from exc
+
+    normalize_cards = getattr(crawler_mod, "normalize_cards", None)
+    if normalize_cards is None:
+        raise RuntimeError("카드 정규화 모듈을 사용할 수 없습니다.")
+
+    if crawler is None:
+        crawler = getattr(crawler_mod, "fetch_search_cards", None)
         if crawler is None:
             raise RuntimeError(
                 "검색 크롤러를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."
-            ) from exc
-        fetch_search_cards = None
-        normalize_cards = None
-
-    if crawler is None:
-        if fetch_search_cards is None:
-            raise RuntimeError(
-                "검색 크롤러를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."
             )
-        crawler = fetch_search_cards
-    if normalize_cards is None:
-        raise RuntimeError("카드 정규화 모듈을 사용할 수 없습니다.")
 
     raw_cards = crawler(job["search_url"])
     crawl = normalize_cards(raw_cards)
