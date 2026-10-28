@@ -58,10 +58,34 @@ EXTRACT_CARDS_JS = """
 }
 """
 
-_NEXT_PAGE_JS = """
-() => Array.from(document.querySelectorAll('.link__page_number'))
-  .map((a) => a.getAttribute('href'))
-  .filter((href) => href && !href.toLowerCase().startsWith('javascript:'))
+_PAGE_LINKS_JS = """
+() => {
+  const read = (a) => {
+    const href = a.getAttribute('href');
+    if (!href || href.toLowerCase().startsWith('javascript:')) return null;
+    return {
+      href: href,
+      text: (a.textContent || '').trim(),
+      active: a.classList.contains('active') || !!a.closest('.active'),
+    };
+  };
+  const pages = Array.from(document.querySelectorAll('.link__page_number'))
+    .map(read)
+    .filter(Boolean);
+  const next = Array.from(
+    document.querySelectorAll('.link__next, a[rel="next"], a')
+  )
+    .filter((a) => {
+      const text = (a.textContent || '').trim().toLowerCase();
+      return (
+        a.matches('.link__next, [rel="next"]') ||
+        ['다음', 'next', '>', '›', '»'].includes(text)
+      );
+    })
+    .map(read)
+    .filter(Boolean);
+  return { pages: pages, next: next };
+}
 """
 
 
@@ -90,16 +114,83 @@ def _profile_path(browser_profile) -> Path:
     return path
 
 
+def _page_number_from_url(url: str) -> int | None:
+    try:
+        values = parse_qs(urlparse(url).query).get("page")
+    except ValueError:
+        return None
+    if not values:
+        return None
+    try:
+        number = int(str(values[0]).strip())
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _page_number_from_text(text: str) -> int | None:
+    digits = re.sub(r"\D", "", text or "")
+    if not digits:
+        return None
+    try:
+        number = int(digits)
+    except ValueError:
+        return None
+    return number if number > 0 else None
+
+
+def _current_page_number(page, links: dict) -> int:
+    current = _page_number_from_url(getattr(page, "url", "") or "")
+    if current is not None:
+        return current
+    for link in links.get("pages") or ():
+        if link.get("active"):
+            current = _page_number_from_text(link.get("text"))
+            if current is not None:
+                return current
+    return 1
+
+
 def _next_page_url(page, visited: set[str]) -> str | None:
     try:
-        hrefs = page.evaluate(_NEXT_PAGE_JS)
+        links = page.evaluate(_PAGE_LINKS_JS)
     except Exception:  # noqa: BLE001 - pagination is best effort
         return None
-    current = getattr(page, "url", "") or ""
-    for href in hrefs or ():
-        absolute = urljoin(current, href)
-        if absolute not in visited:
+    if not isinstance(links, dict):
+        return None
+
+    current_url = getattr(page, "url", "") or ""
+    current = _current_page_number(page, links)
+
+    pages: list[tuple[int | None, str]] = []
+    for link in links.get("pages") or ():
+        absolute = urljoin(current_url, link.get("href") or "")
+        if not absolute or absolute in visited:
+            continue
+        number = _page_number_from_url(absolute)
+        text_number = _page_number_from_text(link.get("text"))
+        if number is None or number <= current:
+            if text_number is not None:
+                number = text_number
+        pages.append((number, absolute))
+
+    for number, absolute in pages:
+        if number == current + 1:
             return absolute
+
+    for link in links.get("next") or ():
+        absolute = urljoin(current_url, link.get("href") or "")
+        if absolute and absolute not in visited:
+            return absolute
+
+    forward = [
+        (number, absolute)
+        for number, absolute in pages
+        if number is not None and number > current
+    ]
+    if forward:
+        forward.sort(key=lambda item: item[0])
+        return forward[0][1]
     return None
 
 
@@ -110,6 +201,7 @@ def fetch_search_cards(
     max_rows: int = 5000,
     browser_profile=None,
 ) -> list[dict]:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
     from playwright.sync_api import sync_playwright
 
     profile = _profile_path(browser_profile)
@@ -128,7 +220,7 @@ def fetch_search_cards(
         cards: list[dict] = []
         try:
             page.wait_for_selector(CARD_SELECTOR, timeout=CARD_WAIT_MS)
-        except Exception:  # noqa: BLE001 - timeout or blocked interstitial
+        except PlaywrightTimeoutError:
             title, body = _page_title_body(page)
             if is_blocked_page(title, body, 0):
                 raise CrawlBlockedError(BLOCKED_MESSAGE)
@@ -140,7 +232,7 @@ def fetch_search_cards(
         while pages_loaded < max_pages:
             pages_loaded += 1
             title, body = _page_title_body(page)
-            page_cards = extract_cards(page)
+            page_cards = extract_cards(page) or []
             if not page_cards and is_blocked_page(title, body, 0):
                 raise CrawlBlockedError(BLOCKED_MESSAGE)
 
@@ -163,15 +255,12 @@ def fetch_search_cards(
             if not next_url:
                 break
             pagination_visited.add(next_url)
+            page.goto(next_url, wait_until="domcontentloaded")
             try:
-                page.goto(next_url, wait_until="domcontentloaded")
                 page.wait_for_selector(CARD_SELECTOR, timeout=CARD_WAIT_MS)
-            except Exception:  # noqa: BLE001 - stop pagination on failure
+            except PlaywrightTimeoutError:
                 title, body = _page_title_body(page)
-                try:
-                    remaining = extract_cards(page)
-                except Exception:  # noqa: BLE001 - page may be unusable
-                    remaining = []
+                remaining = extract_cards(page) or []
                 if not remaining and is_blocked_page(title, body, 0):
                     raise CrawlBlockedError(BLOCKED_MESSAGE)
                 break
@@ -183,7 +272,10 @@ def fetch_search_cards(
                 context.close()
             except Exception:  # noqa: BLE001 - cleanup must not mask errors
                 pass
-        playwright.stop()
+        try:
+            playwright.stop()
+        except Exception:  # noqa: BLE001 - cleanup must not mask errors
+            pass
 
 
 def validate_search_url(url: str) -> None:

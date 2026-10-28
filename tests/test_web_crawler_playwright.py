@@ -3,7 +3,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from playauto.db import connect, ensure_schema
-from playauto.web.crawler import CrawlBlockedError, extract_cards, is_blocked_page
+from playauto.web.crawler import (
+    CrawlBlockedError,
+    _next_page_url,
+    extract_cards,
+    is_blocked_page,
+)
 from playauto.web.queries import claim_next_job, create_crawl_job, get_job
 from playauto.web.worker import process_job
 from tests.web_helpers import make_web_app
@@ -15,6 +20,61 @@ class FakePage:
 
     def evaluate(self, _script):
         return self.cards
+
+
+SEARCH = "https://www.gmarket.co.kr/n/stardelivery/search?keyword=x"
+
+
+class FakePaginationPage:
+    def __init__(self, url, pages, next_links=()):
+        self.url = url
+        self.links = {"pages": list(pages), "next": list(next_links)}
+
+    def evaluate(self, _script):
+        return self.links
+
+
+def _page_link(number):
+    return {
+        "href": f"{SEARCH}&page={number}",
+        "text": str(number),
+        "active": False,
+    }
+
+
+class PaginationHelperTests(unittest.TestCase):
+    def test_prefers_next_page_number_out_of_order(self):
+        page = FakePaginationPage(
+            f"{SEARCH}&page=3",
+            [_page_link(5), _page_link(4), _page_link(3), _page_link(2)],
+        )
+        self.assertEqual(
+            _next_page_url(page, set()), f"{SEARCH}&page=4"
+        )
+
+    def test_uses_next_control_when_no_numbered_next(self):
+        page = FakePaginationPage(
+            f"{SEARCH}&page=3",
+            [_page_link(2)],
+            [{"href": f"{SEARCH}&page=4", "text": "다음", "active": False}],
+        )
+        self.assertEqual(
+            _next_page_url(page, set()), f"{SEARCH}&page=4"
+        )
+
+    def test_never_goes_backward(self):
+        page = FakePaginationPage(
+            f"{SEARCH}&page=5",
+            [_page_link(1), _page_link(2), _page_link(3), _page_link(4)],
+        )
+        self.assertIsNone(_next_page_url(page, set()))
+
+    def test_reads_current_page_from_active_link_without_query(self):
+        active = dict(_page_link(3), active=True)
+        page = FakePaginationPage(SEARCH, [active, _page_link(4)])
+        self.assertEqual(
+            _next_page_url(page, set()), f"{SEARCH}&page=4"
+        )
 
 
 class CrawlerIntegrationTests(unittest.TestCase):
