@@ -11,3 +11,9 @@ out/
 *.log
 .worktrees/
 .venv/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
