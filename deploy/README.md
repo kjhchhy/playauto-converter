@@ -123,25 +123,45 @@ systemctl status playauto-web playauto-worker
 
 - `:80` 블록: **127.0.0.1에만 바인딩되는 로컬 스모크 테스트 전용** 평문
   HTTP. LAN/공인 인터넷에 노출되지 않는다.
-- `{$PLAYAUTO_DOMAIN}` 블록(주석): 운영용. 도메인을 연결하면 Caddy가 자동
-  HTTPS 인증서를 발급한다.
+- `{$PLAYAUTO_DOMAIN}` 블록(주석): Caddy가 직접 TLS를 종료하는 운영 예시.
 
-운영에서는 도메인/HTTPS 구성이 필수다. 스펙은 암호화되지 않은 공개 노출을
-금지한다. 도메인이 없으면 LAN 또는 Tailscale 인터페이스에만 바인딩한다.
+이 저장소의 실제 배포는 **Synology NAS가 TLS를 종료하고, LXC의 Caddy는
+HTTP만 처리**한다. Synology 역방향 프록시의 원본은 `HTTPS` /
+`mall.ds307.duckdns.org` / `443`, 대상은 `HTTP` / `192.168.0.212` / `80`이다.
+Caddy는 Synology IP만 허용해 LXC의 80 포트가 LAN에 직접 노출되지 않게 한다.
+
+```caddyfile
+:80 {
+    log
+    @synology remote_ip 192.168.0.202
+    handle @synology {
+        reverse_proxy 127.0.0.1:8000
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+}
+```
 
 ```bash
-# 예: /etc/caddy/Caddyfile 에 deploy/Caddyfile 내용을 반영
-# 운영 시 PLAYAUTO_DOMAIN 환경변수 또는 실제 도메인을 사용한다.
+caddy fmt --overwrite /etc/caddy/Caddyfile
 caddy validate --config /etc/caddy/Caddyfile
-systemctl reload caddy
+systemctl restart caddy
 ```
+
+Synology에서 HSTS를 켜고, 필요하면 `Upgrade`/`Connection` 헤더를 전달한다.
+Caddy의 `respond 403`를 unconditional로 먼저 두면 directive order 때문에
+프록시가 막힐 수 있으므로 반드시 `handle` 블록으로 분기한다.
 
 ## 9. 접속과 로그인 확인
 
-- 운영: `https://<도메인>/`
-- 로컬 스모크: 컨테이너 안에서 `http://127.0.0.1/` (SSH 포트 포워딩 등 사용)
+- 운영: `https://mall.ds307.duckdns.org/`
+- LXC 내부: `http://127.0.0.1:8000/` (Caddy allowlist를 우회한 앱 직접 확인;
+  `SESSION_COOKIE_SECURE=true`에서는 로그인 세션은 HTTPS에서만 유지)
+- `https://mall.ds307.duckdns.org/`는 로그인 전 `302 /login?next=/`가 정상
 - 관리자 비밀번호로 로그인되는지 확인
 - 상품 등록, 크롤 job 생성, export 다운로드까지 한 번 점검
+- HTTPS 로그인 응답의 `Set-Cookie`에 `Secure; HttpOnly; SameSite=Lax`가 있어야 한다.
 
 ## 10. 백업과 복구
 
