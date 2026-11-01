@@ -14,7 +14,7 @@ class WebSchemaTests(unittest.TestCase):
         self.addCleanup(self.conn.close)
         ensure_schema(self.conn)
 
-    def test_schema_v2_adds_web_tables_and_version(self):
+    def test_schema_v3_adds_web_tables_and_version(self):
         tables = {
             row[0]
             for row in self.conn.execute(
@@ -23,9 +23,9 @@ class WebSchemaTests(unittest.TestCase):
         }
         self.assertIn("app_settings", tables)
         self.assertIn("crawl_jobs", tables)
-        self.assertEqual(SCHEMA_VERSION, 2)
+        self.assertEqual(SCHEMA_VERSION, 3)
         self.assertEqual(
-            self.conn.execute("PRAGMA user_version").fetchone()[0], 2
+            self.conn.execute("PRAGMA user_version").fetchone()[0], 3
         )
 
     def test_delete_product_removes_listings_and_history(self):
