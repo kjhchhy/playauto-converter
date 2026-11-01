@@ -1,3 +1,4 @@
+import json
 import math
 import os
 import sqlite3
@@ -27,6 +28,12 @@ from playauto.pricing import final_sale_price
 
 from .auth import check_password, csrf_token, login_required
 from .crawler import unit_price
+from .detail_page_service import (
+    DETAIL_PAGE_DIR,
+    generate_detail_page,
+    parse_detail_page_form,
+    save_detail_page,
+)
 from .export_service import (
     delete_export,
     export_file,
@@ -243,13 +250,72 @@ def products():
     )
 
 
+def _extra_images_text(product) -> str:
+    raw = product["detail_page_extra_images"] or ""
+    try:
+        urls = json.loads(raw)
+    except (TypeError, ValueError):
+        urls = []
+    if not isinstance(urls, list):
+        urls = []
+    return "\n".join(str(url) for url in urls)
+
+
 @bp.get("/products/<int:product_id>")
 @login_required
 def product_detail(product_id: int):
     detail = get_product_detail(_db(), product_id)
     if detail is None:
         abort(404)
+    tab = request.args.get("tab", "info")
+    if tab not in ("info", "detail"):
+        tab = "info"
+    detail["tab"] = tab
+    detail["extra_images_text"] = _extra_images_text(detail["product"])
+    detail["has_preview"] = (
+        Path(DETAIL_PAGE_DIR) / f"{product_id}.jpg"
+    ).exists()
     return render_template("product_detail.html", **detail)
+
+
+@bp.post("/products/<int:product_id>/detail-page")
+@login_required
+def product_detail_save(product_id: int):
+    conn = _db()
+    if get_product_detail(conn, product_id) is None:
+        abort(404)
+    save_detail_page(conn, product_id, parse_detail_page_form(request.form))
+    flash("상세페이지를 저장했습니다.")
+    return redirect(
+        url_for("main.product_detail", product_id=product_id, tab="detail")
+    )
+
+
+@bp.post("/products/<int:product_id>/detail-page/generate")
+@login_required
+def product_detail_generate(product_id: int):
+    conn = _db()
+    if get_product_detail(conn, product_id) is None:
+        abort(404)
+    try:
+        generate_detail_page(conn, product_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("상세페이지 JPG를 생성했습니다.")
+    return redirect(
+        url_for("main.product_detail", product_id=product_id, tab="detail")
+    )
+
+
+@bp.get("/products/<int:product_id>/detail-page/preview")
+@login_required
+def product_detail_preview(product_id: int):
+    if get_product_detail(_db(), product_id) is None:
+        abort(404)
+    return send_from_directory(
+        DETAIL_PAGE_DIR, f"{product_id}.jpg", mimetype="image/jpeg"
+    )
 
 
 @bp.post("/products/<int:product_id>")

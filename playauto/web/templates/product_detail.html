@@ -25,6 +25,14 @@
   </p>
 </section>
 
+<nav class="tabs">
+  <a class="tab{% if tab == 'info' %} active{% endif %}"
+     href="{{ url_for('main.product_detail', product_id=product.id, tab='info') }}">상품 정보</a>
+  <a class="tab{% if tab == 'detail' %} active{% endif %}"
+     href="{{ url_for('main.product_detail', product_id=product.id, tab='detail') }}">상세페이지</a>
+</nav>
+
+{% if tab == 'info' %}
 <section class="card">
   <h2>상품 정보 수정</h2>
   <form method="post" action="{{ url_for('main.product_update', product_id=product.id) }}">
@@ -81,6 +89,56 @@
     <button type="submit">저장</button>
   </form>
 </section>
+{% else %}
+<section class="card">
+  <h2>상세페이지</h2>
+  <form method="post" action="{{ url_for('main.product_detail_save', product_id=product.id) }}">
+    {{ csrf_field() }}
+
+    <label for="detail_page_title">상세페이지 제목 (최대 2줄)</label>
+    <input id="detail_page_title" type="text" name="detail_page_title"
+           value="{{ product.detail_page_title or product.name }}">
+
+    <label for="detail_page_marketing">마케팅 문구</label>
+    <textarea id="detail_page_marketing" name="detail_page_marketing" rows="3">{{ product.detail_page_marketing or '' }}</textarea>
+
+    <label for="detail_page_extra_images">추가 이미지 URL (한 줄에 하나, 최대 5장)</label>
+    <textarea id="detail_page_extra_images" name="detail_page_extra_images" rows="5">{{ extra_images_text }}</textarea>
+
+    <label for="notice_image_url">고시 이미지 URL (필수)</label>
+    <input id="notice_image_url" type="text" name="notice_image_url"
+           value="{{ product.notice_image_url or '' }}" required>
+
+    <label for="detail_page_caution">꼭 확인해주세요</label>
+    <textarea id="detail_page_caution" name="detail_page_caution" rows="3"
+              placeholder="비워두면 기본 안내문이 사용됩니다.">{{ product.detail_page_caution or '' }}</textarea>
+
+    <label for="detail_page_url">11번가 상세페이지 URL</label>
+    <input id="detail_page_url" type="text" name="detail_page_url"
+           value="{{ product.detail_page_url or '' }}">
+
+    <button type="submit">저장</button>
+  </form>
+
+  <form method="post" action="{{ url_for('main.product_detail_generate', product_id=product.id) }}">
+    {{ csrf_field() }}
+    <button type="submit">JPG 생성</button>
+  </form>
+
+  {% if product.detail_page_updated_at %}
+  <p class="muted">마지막 저장: {{ product.detail_page_updated_at }}</p>
+  {% endif %}
+
+  {% if has_preview %}
+  <h3>미리보기</h3>
+  <img class="detail-preview"
+       src="{{ url_for('main.product_detail_preview', product_id=product.id) }}"
+       alt="상세페이지 미리보기">
+  {% else %}
+  <p class="muted">JPG를 생성하면 미리보기가 표시됩니다.</p>
+  {% endif %}
+</section>
+{% endif %}
 
 <section class="card">
   <h2>가격 이력</h2>
