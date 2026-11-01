@@ -19,8 +19,8 @@ class DetailPageHtmlTests(unittest.TestCase):
     def test_build_detail_page_html_escapes_user_text_and_orders_images(self):
         html = build_detail_page_html(
             title="<script>alert(1)</script>",
-            marketing="신선한 주스",
-            caution="유통기한을 확인하세요",
+            marketing="<b>신선한</b> 주스",
+            caution="<i>유통기한</i>을 확인하세요",
             main_image_url="https://img/main.jpg",
             extra_image_urls=["https://img/1.jpg", "https://img/2.jpg"],
             notice_image_url="https://img/notice.jpg",
@@ -29,6 +29,10 @@ class DetailPageHtmlTests(unittest.TestCase):
 
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
         self.assertNotIn("<script>alert(1)</script>", html)
+        self.assertIn("&lt;b&gt;신선한&lt;/b&gt; 주스", html)
+        self.assertNotIn("<b>신선한</b> 주스", html)
+        self.assertIn("&lt;i&gt;유통기한&lt;/i&gt;을 확인하세요", html)
+        self.assertNotIn("<i>유통기한</i>을 확인하세요", html)
         self.assertLess(
             html.index("https://img/main.jpg"), html.index("https://img/1.jpg")
         )

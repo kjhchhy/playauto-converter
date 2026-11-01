@@ -15,13 +15,28 @@ def _text(form, key: str) -> str:
     return str(value or "").strip()
 
 
+def _normalize_extra_images(value) -> list[str]:
+    if isinstance(value, str):
+        parts = re.split(r"[\n,]+", value)
+    elif isinstance(value, (list, tuple)):
+        parts = value
+    else:
+        parts = []
+    return [str(part).strip() for part in parts if str(part).strip()][:5]
+
+
+def _decode_extra_images(raw) -> list[str]:
+    try:
+        value = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        value = []
+    return _normalize_extra_images(value)
+
+
 def parse_detail_page_form(form) -> dict:
-    raw_images = _text(form, "detail_page_extra_images")
-    extra_images = [
-        part.strip()
-        for part in re.split(r"[\n,]+", raw_images)
-        if part.strip()
-    ][:5]
+    extra_images = _normalize_extra_images(
+        _text(form, "detail_page_extra_images")
+    )
     return {
         "detail_page_title": _text(form, "detail_page_title"),
         "detail_page_marketing": _text(form, "detail_page_marketing"),
@@ -35,12 +50,9 @@ def parse_detail_page_form(form) -> dict:
 def save_detail_page(
     conn: sqlite3.Connection, product_id: int, values: dict
 ) -> None:
-    extra_images = values.get("detail_page_extra_images") or []
-    if isinstance(extra_images, str):
-        extra_images = [extra_images]
-    extra_images = [
-        str(url).strip() for url in extra_images if str(url).strip()
-    ][:5]
+    extra_images = _normalize_extra_images(
+        values.get("detail_page_extra_images")
+    )
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with conn:
         conn.execute(
@@ -84,15 +96,7 @@ def generate_detail_page(
     if not notice_image_url:
         raise ValueError("고시 이미지가 필요합니다.")
 
-    try:
-        extra_images = json.loads(product["detail_page_extra_images"] or "[]")
-    except (TypeError, ValueError):
-        extra_images = []
-    if not isinstance(extra_images, list):
-        extra_images = []
-    extra_images = [
-        str(url).strip() for url in extra_images if str(url).strip()
-    ][:5]
+    extra_images = _decode_extra_images(product["detail_page_extra_images"])
 
     html = build_detail_page_html(
         title=product["detail_page_title"] or product["name"],
