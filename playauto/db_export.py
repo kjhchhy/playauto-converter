@@ -33,7 +33,7 @@ def _row_values(row: ExportRow, coupang_single=False):
         row.market_price,
         row.margin_rate,
         row.image_url,
-        row.detail,
+        row.detail_page_url or row.detail,
         row.keywords,
         row.manufacturer,
         row.brand,

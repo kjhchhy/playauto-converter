@@ -186,6 +186,7 @@ class ExportRow:
     pack_config: str | None
     capacity_per_unit: str | None
     bundle_qty: int
+    detail_page_url: str | None = None
 
 
 EXPORT_QUERY = """
@@ -193,7 +194,7 @@ SELECT l.id AS listing_id, p.id AS product_id, p.source_seq, l.seller_code,
        l.sale_name, l.market_price, l.margin_rate, p.image_url, p.order_url,
        p.category_code, p.detail, p.keywords, p.manufacturer, p.brand, p.model,
        l.unit_price_visible, l.display_capacity, l.display_unit, l.pack_config,
-       l.capacity_per_unit, l.bundle_qty
+       l.capacity_per_unit, l.bundle_qty, p.detail_page_url
 FROM listings l JOIN products p ON p.id = l.product_id
 WHERE l.active = 1
 ORDER BY p.source_seq, l.bundle_qty, l.id
@@ -232,6 +233,7 @@ def fetch_export_rows(conn: sqlite3.Connection) -> list[ExportRow]:
             pack_config=row["pack_config"],
             capacity_per_unit=row["capacity_per_unit"],
             bundle_qty=row["bundle_qty"],
+            detail_page_url=row["detail_page_url"],
         )
         for row in conn.execute(EXPORT_QUERY)
     ]

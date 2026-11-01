@@ -73,6 +73,43 @@ class SettingWriterTests(unittest.TestCase):
             ],
         )
 
+    def test_write_setting_uses_detail_page_url_for_detail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            reference = tmp / "reference.xlsx"
+            output = tmp / "setting.xlsx"
+            make_reference(reference)
+
+            result = write_setting_from_rows(
+                reference,
+                [
+                    make_export_row(
+                        detail="기존 상세",
+                        detail_page_url="https://11st/detail/1",
+                    )
+                ],
+                output,
+            )
+            ws = load_workbook(result)["setting"]
+
+        self.assertEqual(ws["H2"].value, "https://11st/detail/1")
+
+    def test_write_setting_falls_back_to_detail_without_detail_page_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            reference = tmp / "reference.xlsx"
+            output = tmp / "setting.xlsx"
+            make_reference(reference)
+
+            result = write_setting_from_rows(
+                reference,
+                [make_export_row(detail="기존 상세")],
+                output,
+            )
+            ws = load_workbook(result)["setting"]
+
+        self.assertEqual(ws["H2"].value, "기존 상세")
+
     def test_write_setting_preserves_template_and_other_sheets(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
@@ -241,6 +278,51 @@ class ExportTests(unittest.TestCase):
         self.assertNotIn("주문링크", general_headers)
         self.assertEqual(single_price, 9500)
         self.assertEqual(general_price, 8900)
+
+    def test_export_from_db_uses_detail_page_url_in_setting_detail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            db = tmp / "test.db"
+            reference = tmp / "reference.xlsx"
+            out = tmp / "out"
+            make_reference(reference)
+            conn = make_db(db)
+            import_crawl(
+                conn,
+                CrawlData(
+                    (
+                        CrawlRow(
+                            1,
+                            "상품1",
+                            7080,
+                            "https://img/1.jpg",
+                            "https://order/1",
+                            detail="기존 상세",
+                        ),
+                    ),
+                    0,
+                ),
+                category_code="C1",
+                margin=0.15,
+                crawl_path="crawl.xlsx",
+            )
+            conn.execute(
+                "UPDATE products SET detail_page_url = ?",
+                ("https://11st/detail/1",),
+            )
+            conn.commit()
+            conn.close()
+
+            result = export_from_db(
+                db,
+                reference,
+                out,
+                selected_option="기타재화[35]",
+                run_date=date(2026, 10, 27),
+            )
+            ws = load_workbook(result["setting"])["setting"]
+
+        self.assertEqual(ws["H2"].value, "https://11st/detail/1")
 
     def test_export_from_db_fails_before_writing_when_row_invalid(self):
         with tempfile.TemporaryDirectory() as tmp:
