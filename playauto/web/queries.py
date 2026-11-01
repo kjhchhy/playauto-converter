@@ -35,6 +35,13 @@ PRODUCT_FIELDS = (
     "manufacturer",
     "brand",
     "model",
+    "detail_page_title",
+    "detail_page_marketing",
+    "detail_page_caution",
+    "detail_page_extra_images",
+    "notice_image_url",
+    "detail_page_url",
+    "detail_page_updated_at",
 )
 
 LISTING_FIELDS = (
@@ -50,7 +57,10 @@ LISTING_FIELDS = (
 PRODUCT_SELECT = """
 SELECT p.id, p.source_seq, p.name, p.image_url, p.order_url,
        p.category_code, p.detail, p.keywords, p.manufacturer, p.brand,
-       p.model, p.created_at, p.updated_at, p.last_seen_at,
+       p.model, p.detail_page_title, p.detail_page_marketing,
+       p.detail_page_caution, p.detail_page_extra_images,
+       p.notice_image_url, p.detail_page_url, p.detail_page_updated_at,
+       p.created_at, p.updated_at, p.last_seen_at,
        l.id AS listing_id, l.seller_code, l.bundle_qty, l.sale_name,
        l.market_price, l.margin_rate, l.unit_price_visible,
        l.display_capacity, l.display_unit, l.pack_config,
