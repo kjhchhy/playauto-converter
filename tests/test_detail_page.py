@@ -37,6 +37,7 @@ class DetailPageHtmlTests(unittest.TestCase):
         )
         self.assertIn("width: 860px", html)
         self.assertIn("-webkit-line-clamp: 2", html)
+        self.assertIn("word-break: keep-all", html)
 
     def test_build_detail_page_html_uses_default_caution_when_blank(self):
         html = build_detail_page_html(

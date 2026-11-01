@@ -83,6 +83,8 @@ def build_detail_page_html(
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
   }}
   .marketing {{
     margin: 18px 0 0;
