@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from .pricing import parse_margin_ratio
 
 DEFAULT_DB_PATH = Path("data/playauto.db")
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 REQUIRED_HEADERS = ("순번", "대표이미지", "상품명", "판매가격", "URL")
 OPTIONAL_HEADERS = (
@@ -49,6 +49,13 @@ CREATE TABLE IF NOT EXISTS products (
     manufacturer TEXT,
     brand TEXT,
     model TEXT,
+    detail_page_title TEXT,
+    detail_page_marketing TEXT,
+    detail_page_caution TEXT,
+    detail_page_extra_images TEXT,
+    notice_image_url TEXT,
+    detail_page_url TEXT,
+    detail_page_updated_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_seen_at TEXT NOT NULL,
@@ -281,8 +288,30 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+DETAIL_PAGE_COLUMNS = (
+    "detail_page_title TEXT",
+    "detail_page_marketing TEXT",
+    "detail_page_caution TEXT",
+    "detail_page_extra_images TEXT",
+    "notice_image_url TEXT",
+    "detail_page_url TEXT",
+    "detail_page_updated_at TEXT",
+)
+
+
+def migrate_schema(conn: sqlite3.Connection) -> None:
+    existing = {
+        row["name"] for row in conn.execute("PRAGMA table_info(products)")
+    }
+    for definition in DETAIL_PAGE_COLUMNS:
+        name = definition.split()[0]
+        if name not in existing:
+            conn.execute(f"ALTER TABLE products ADD COLUMN {definition}")
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
+    migrate_schema(conn)
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     conn.commit()
 
