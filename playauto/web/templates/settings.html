@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "base.html" import csrf_field %}
+
+{% block title %}설정 · 플레이오토 관리자{% endblock %}
+
+{% block content %}
+<header class="topbar">
+  <h1>설정</h1>
+  <form method="post" action="{{ url_for('main.logout') }}">
+    {{ csrf_field() }}
+    <button type="submit" class="secondary">로그아웃</button>
+  </form>
+</header>
+
+{% if error %}
+<p class="flash error">{{ error }}</p>
+{% endif %}
+
+<section class="card">
+  <h2>기본값</h2>
+  <form method="post" action="{{ url_for('main.settings_submit') }}" class="filters">
+    {{ csrf_field() }}
+
+    <label for="default_category_code">기본 카테고리</label>
+    <select id="default_category_code" name="default_category_code" required>
+      {% for option in options %}
+      <option value="{{ option }}"
+              {% if option == settings.default_category_code %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="default_margin">기본 마진율 (0 이상 1 미만)</label>
+    <input id="default_margin" type="number" name="default_margin"
+           min="0" max="0.99" step="0.01"
+           value="{{ settings.default_margin }}" required>
+
+    <label for="commission_gmarket">지마켓 수수료 (%)</label>
+    <input id="commission_gmarket" type="number" name="commission_gmarket"
+           min="0" max="99.99" step="0.01"
+           value="{{ settings.commission_gmarket }}">
+
+    <label for="commission_smartstore">스마트스토어 수수료 (%)</label>
+    <input id="commission_smartstore" type="number" name="commission_smartstore"
+           min="0" max="99.99" step="0.01"
+           value="{{ settings.commission_smartstore }}">
+
+    <label for="commission_coupang">쿠팡 수수료 (%)</label>
+    <input id="commission_coupang" type="number" name="commission_coupang"
+           min="0" max="99.99" step="0.01"
+           value="{{ settings.commission_coupang }}">
+
+    <div class="actions">
+      <button type="submit">저장</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>읽기 전용</h2>
+  <dl class="reference-info">
+    <dt>export 보관 기간</dt>
+    <dd>{{ export_ttl_hours }}시간</dd>
+    <dt>기준 엑셀</dt>
+    <dd>{{ reference.original_name or "등록된 기준 엑셀이 없습니다." }}</dd>
+    <dt>업로드 시각</dt>
+    <dd>{{ reference.uploaded_at or "-" }}</dd>
+    <dt>해시</dt>
+    <dd>{{ reference.sha256[:12] if reference.sha256 else "-" }}</dd>
+  </dl>
+  <p class="muted">비밀번호는 환경 변수로 관리하며 이 화면에서 변경할 수 없습니다.</p>
+</section>
+{% endblock %}

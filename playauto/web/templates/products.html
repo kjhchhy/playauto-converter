@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% from "base.html" import csrf_field %}
+
+{% block title %}상품 목록 · 플레이오토 관리자{% endblock %}
+
+{% macro money(value) -%}
+{{ "{:,}".format(value) if value is not none else "-" }}
+{%- endmacro %}
+
+{% block content %}
+<header class="topbar">
+  <h1>상품 목록</h1>
+  <form method="post" action="{{ url_for('main.logout') }}">
+    {{ csrf_field() }}
+    <button type="submit" class="secondary">로그아웃</button>
+  </form>
+</header>
+
+<section class="card">
+  <form method="get" action="{{ url_for('main.products') }}" class="filters">
+    <label for="q">검색</label>
+    <input id="q" type="search" name="q" value="{{ filters.q or '' }}"
+           placeholder="상품명, 브랜드, 판매자코드, URL">
+
+    <label for="category">카테고리 코드</label>
+    <input id="category" type="text" name="category"
+           value="{{ filters.category or '' }}">
+
+    <label for="brand">브랜드</label>
+    <input id="brand" type="text" name="brand"
+           value="{{ filters.brand or '' }}">
+
+    <label for="min_price">최소 가격</label>
+    <input id="min_price" type="number" name="min_price" min="0"
+           value="{{ filters.min_price if filters.min_price is not none else '' }}">
+
+    <label for="max_price">최대 가격</label>
+    <input id="max_price" type="number" name="max_price" min="0"
+           value="{{ filters.max_price if filters.max_price is not none else '' }}">
+
+    <div class="actions">
+      <button type="submit">검색</button>
+      <a class="button secondary" href="{{ url_for('main.products') }}">초기화</a>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <p class="muted">총 {{ total }}개 상품</p>
+  <form method="post" action="{{ url_for('main.products_bulk_delete') }}">
+    {{ csrf_field() }}
+    <table class="product-table">
+      <thead>
+        <tr>
+          <th scope="col"><input type="checkbox" id="select-all"></th>
+          <th scope="col">상품명</th>
+          <th scope="col">브랜드</th>
+          <th scope="col">판매자코드</th>
+          <th scope="col">마켓가격</th>
+          <th scope="col">마진율</th>
+          <th scope="col">관리</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in products %}
+        <tr>
+          <td><input type="checkbox" name="ids" value="{{ item.id }}"></td>
+          <td><a href="{{ url_for('main.product_detail', product_id=item.id) }}">{{ item.name }}</a></td>
+          <td>{{ item.brand or "-" }}</td>
+          <td>{{ item.seller_code }}</td>
+          <td>{{ money(item.market_price) }}</td>
+          <td>{{ "%.2f"|format(item.margin_rate) if item.margin_rate is not none else "-" }}</td>
+          <td>
+            <a href="{{ url_for('main.product_detail', product_id=item.id) }}">수정</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7" class="muted">조건에 맞는 상품이 없습니다.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button type="submit" class="danger">선택 삭제</button>
+  </form>
+
+  {% if pages > 1 %}
+  <nav class="pagination">
+    {% if page > 1 %}
+    <a href="{{ url_for('main.products', page=page - 1, q=filters.q, category=filters.category, brand=filters.brand, min_price=filters.min_price, max_price=filters.max_price) }}">이전</a>
+    {% endif %}
+    <span>{{ page }} / {{ pages }}</span>
+    {% if page < pages %}
+    <a href="{{ url_for('main.products', page=page + 1, q=filters.q, category=filters.category, brand=filters.brand, min_price=filters.min_price, max_price=filters.max_price) }}">다음</a>
+    {% endif %}
+  </nav>
+  {% endif %}
+</section>
+
+<script>
+  document.getElementById("select-all").addEventListener("change", function (event) {
+    document.querySelectorAll('input[name="ids"]').forEach(function (box) {
+      box.checked = event.target.checked;
+    });
+  });
+</script>
+{% endblock %}

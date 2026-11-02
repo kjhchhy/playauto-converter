@@ -1,0 +1,26 @@
+[Unit]
+Description=Playauto crawl worker
+After=network.target playauto-web.service
+
+[Service]
+User=playauto
+Group=playauto
+WorkingDirectory=/opt/playauto
+Environment=PYTHONPATH=/opt/playauto:/opt/playauto/vendor
+Environment=HOME=/opt/playauto
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/playauto/.cache/ms-playwright
+EnvironmentFile=/etc/playauto.env
+ExecStart=/opt/playauto/.venv/bin/python -m playauto.web.worker
+Restart=always
+RestartSec=5
+
+# 보안 강화: worker는 data/ 아래 DB, exports, browser-profile에만 쓴다.
+# 설치된 Chromium(/opt/playauto/.cache/ms-playwright)은 읽기 전용으로
+# 보이며, 실행에 필요한 임시 파일은 PrivateTmp가 제공하는 /tmp에 쓴다.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/playauto/data
+
+[Install]
+WantedBy=multi-user.target

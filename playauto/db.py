@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from .pricing import parse_margin_ratio
 
 DEFAULT_DB_PATH = Path("data/playauto.db")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 REQUIRED_HEADERS = ("순번", "대표이미지", "상품명", "판매가격", "URL")
 OPTIONAL_HEADERS = (
@@ -49,6 +49,13 @@ CREATE TABLE IF NOT EXISTS products (
     manufacturer TEXT,
     brand TEXT,
     model TEXT,
+    detail_page_title TEXT,
+    detail_page_marketing TEXT,
+    detail_page_caution TEXT,
+    detail_page_extra_images TEXT,
+    notice_image_url TEXT,
+    detail_page_url TEXT,
+    detail_page_updated_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_seen_at TEXT NOT NULL,
@@ -88,6 +95,35 @@ CREATE TABLE IF NOT EXISTS price_history (
 CREATE INDEX IF NOT EXISTS idx_listings_active ON listings(active);
 CREATE INDEX IF NOT EXISTS idx_listings_product_id ON listings(product_id);
 CREATE INDEX IF NOT EXISTS idx_products_source_seq ON products(source_seq);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS crawl_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TEXT,
+    finished_at TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    source TEXT NOT NULL,
+    search_url TEXT,
+    xlsx_path TEXT,
+    category_code TEXT NOT NULL,
+    margin REAL NOT NULL,
+    page_count INTEGER NOT NULL DEFAULT 0,
+    row_count INTEGER NOT NULL DEFAULT 0,
+    inserted_count INTEGER NOT NULL DEFAULT 0,
+    updated_count INTEGER NOT NULL DEFAULT 0,
+    skipped_count INTEGER NOT NULL DEFAULT 0,
+    import_batch_id INTEGER REFERENCES import_batches(id),
+    error TEXT,
+    worker_pid INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_crawl_jobs_status ON crawl_jobs(status, id);
 """
 
 
@@ -150,6 +186,7 @@ class ExportRow:
     pack_config: str | None
     capacity_per_unit: str | None
     bundle_qty: int
+    detail_page_url: str | None = None
 
 
 EXPORT_QUERY = """
@@ -157,7 +194,7 @@ SELECT l.id AS listing_id, p.id AS product_id, p.source_seq, l.seller_code,
        l.sale_name, l.market_price, l.margin_rate, p.image_url, p.order_url,
        p.category_code, p.detail, p.keywords, p.manufacturer, p.brand, p.model,
        l.unit_price_visible, l.display_capacity, l.display_unit, l.pack_config,
-       l.capacity_per_unit, l.bundle_qty
+       l.capacity_per_unit, l.bundle_qty, p.detail_page_url
 FROM listings l JOIN products p ON p.id = l.product_id
 WHERE l.active = 1
 ORDER BY p.source_seq, l.bundle_qty, l.id
@@ -196,6 +233,7 @@ def fetch_export_rows(conn: sqlite3.Connection) -> list[ExportRow]:
             pack_config=row["pack_config"],
             capacity_per_unit=row["capacity_per_unit"],
             bundle_qty=row["bundle_qty"],
+            detail_page_url=row["detail_page_url"],
         )
         for row in conn.execute(EXPORT_QUERY)
     ]
@@ -252,10 +290,46 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+DETAIL_PAGE_COLUMNS = (
+    "detail_page_title TEXT",
+    "detail_page_marketing TEXT",
+    "detail_page_caution TEXT",
+    "detail_page_extra_images TEXT",
+    "notice_image_url TEXT",
+    "detail_page_url TEXT",
+    "detail_page_updated_at TEXT",
+)
+
+
+def migrate_schema(conn: sqlite3.Connection) -> None:
+    existing = {
+        row["name"] for row in conn.execute("PRAGMA table_info(products)")
+    }
+    for definition in DETAIL_PAGE_COLUMNS:
+        name = definition.split()[0]
+        if name not in existing:
+            conn.execute(f"ALTER TABLE products ADD COLUMN {definition}")
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
+    migrate_schema(conn)
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     conn.commit()
+
+
+def delete_product(conn: sqlite3.Connection, product_id: int) -> int:
+    with conn:
+        conn.execute(
+            "DELETE FROM price_history WHERE product_id = ?", (product_id,)
+        )
+        conn.execute(
+            "DELETE FROM listings WHERE product_id = ?", (product_id,)
+        )
+        cursor = conn.execute(
+            "DELETE FROM products WHERE id = ?", (product_id,)
+        )
+        return cursor.rowcount
 
 
 def parse_price(value) -> int:

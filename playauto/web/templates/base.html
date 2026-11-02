@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>{% block title %}플레이오토 관리자{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <script src="{{ url_for('static', filename='htmx.min.js') }}" defer></script>
+</head>
+<body>
+  {% macro csrf_field() -%}
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {%- endmacro %}
+  <main class="container">
+    {% if session.get('logged_in') %}
+    <nav class="nav">
+      <a href="{{ url_for('main.dashboard') }}">대시보드</a>
+      <a href="{{ url_for('main.products') }}">상품 목록</a>
+      <a href="{{ url_for('main.imports') }}">가져오기</a>
+      <a href="{{ url_for('main.exports') }}">내보내기</a>
+    </nav>
+    {% endif %}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+      <p class="flash {{ category }}">{{ message }}</p>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

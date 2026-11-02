@@ -75,8 +75,63 @@ class DbSchemaTests(unittest.TestCase):
             self.assertTrue(
                 {"products", "listings", "price_history", "import_batches"} <= names
             )
-            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 3)
             conn.close()
+
+    def test_migrate_v2_db_adds_detail_page_columns_and_preserves_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = connect(Path(tmp) / "test.db")
+            try:
+                conn.executescript(
+                    """
+                    CREATE TABLE products (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        source_seq INTEGER NOT NULL,
+                        name TEXT NOT NULL,
+                        image_url TEXT NOT NULL,
+                        order_url TEXT NOT NULL UNIQUE,
+                        category_code TEXT NOT NULL,
+                        detail TEXT,
+                        keywords TEXT,
+                        manufacturer TEXT,
+                        brand TEXT,
+                        model TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        last_seen_at TEXT NOT NULL,
+                        last_batch_id INTEGER
+                    );
+                    INSERT INTO products (source_seq, name, image_url, order_url,
+                        category_code, last_seen_at)
+                    VALUES (1, '기존 상품', 'img', 'https://order/1', 'C1', 'now');
+                    """
+                )
+                ensure_schema(conn)
+                columns = {
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(products)")
+                }
+                self.assertTrue(
+                    {
+                        "detail_page_title",
+                        "detail_page_marketing",
+                        "detail_page_caution",
+                        "detail_page_extra_images",
+                        "notice_image_url",
+                        "detail_page_url",
+                        "detail_page_updated_at",
+                    }
+                    <= columns
+                )
+                self.assertEqual(
+                    conn.execute("SELECT name FROM products").fetchone()["name"],
+                    "기존 상품",
+                )
+                self.assertEqual(
+                    conn.execute("PRAGMA user_version").fetchone()[0], 3
+                )
+            finally:
+                conn.close()
 
     def test_load_crawl_rows_maps_optional_columns_and_counts_blank_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
